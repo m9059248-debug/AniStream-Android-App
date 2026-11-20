@@ -6,7 +6,6 @@ import android.app.Activity
 import android.content.pm.ActivityInfo
 import android.view.GestureDetector
 import android.view.MotionEvent
-import android.view.View
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -30,6 +29,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.zIndex
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.exoplayer.ExoPlayer
@@ -237,133 +240,137 @@ private suspend fun fetchEpisodes(seasonId: String): List<AnimeEpisode> =
         list
     }
 
-private suspend fun fetchVideoServers(episodeId: String): List<VideoServer> =
-    withContext(Dispatchers.IO) {
-        val endpoint =
-            "$SUPABASE_URL/rest/v1/video_servers" +
-            "?select=id,episode_id,server_name,video_url,quality,language" +
-            "&episode_id=eq.$episodeId"
+private suspend fun fetchVideoServers(
+    episodeId: String
+): List<VideoServer> = withContext(Dispatchers.IO) {
+    val endpoint =
+        "$SUPABASE_URL/rest/v1/video_servers" +
+        "?select=id,episode_id,server_name,video_url,quality,language" +
+        "&episode_id=eq.$episodeId"
 
-        val array = JSONArray(request(endpoint, supabase = true))
-        val list = mutableListOf<VideoServer>()
+    val array = JSONArray(request(endpoint, supabase = true))
+    val list = mutableListOf<VideoServer>()
 
-        for (i in 0 until array.length()) {
-            val item = array.getJSONObject(i)
-            val videoUrl = item.optString("video_url")
+    for (i in 0 until array.length()) {
+        val item = array.getJSONObject(i)
+        val videoUrl = item.optString("video_url")
 
-            if (videoUrl.isNotBlank() && videoUrl != "null") {
-                list.add(
-                    VideoServer(
-                        id = item.optString("id"),
-                        episodeId = item.optString("episode_id"),
-                        serverName = item.optString("server_name"),
-                        videoUrl = videoUrl,
-                        quality = item.optString("quality"),
-                        language = item.optString("language")
-                    )
+        if (videoUrl.isNotBlank() && videoUrl != "null") {
+            list.add(
+                VideoServer(
+                    id = item.optString("id"),
+                    episodeId = item.optString("episode_id"),
+                    serverName = item.optString("server_name"),
+                    videoUrl = videoUrl,
+                    quality = item.optString("quality"),
+                    language = item.optString("language")
                 )
-            }
+            )
         }
-        list
     }
+    list
+}
 
-private suspend fun fetchAnimeDetails(title: String): AnimeDetails =
-    withContext(Dispatchers.IO) {
-        val query = """
-            query (${'$'}search: String) {
-              Media(search: ${'$'}search, type: ANIME) {
-                title { english romaji native }
-                description(asHtml: false)
-                bannerImage
-                genres
-                seasonYear
-                episodes
-                averageScore
-                status
-                studios(isMain: true) { nodes { name } }
-                characters(sort: ROLE, perPage: 12) {
-                  edges {
-                    role
-                    node {
-                      name { full }
-                      image { large }
-                    }
-                  }
+private suspend fun fetchAnimeDetails(
+    title: String
+): AnimeDetails = withContext(Dispatchers.IO) {
+
+    val query = """
+        query (${'$'}search: String) {
+          Media(search: ${'$'}search, type: ANIME) {
+            title { english romaji native }
+            description(asHtml: false)
+            bannerImage
+            genres
+            seasonYear
+            episodes
+            averageScore
+            status
+            studios(isMain: true) { nodes { name } }
+            characters(sort: ROLE, perPage: 12) {
+              edges {
+                role
+                node {
+                  name { full }
+                  image { large }
                 }
               }
             }
-        """.trimIndent()
-
-        val body = JSONObject().apply {
-            put("query", query)
-            put("variables", JSONObject().put("search", title))
+          }
         }
+    """.trimIndent()
 
-        val response = request(
-            "https://graphql.anilist.co",
-            "POST",
-            body.toString()
-        )
-
-        val media = JSONObject(response)
-            .getJSONObject("data")
-            .optJSONObject("Media")
-            ?: throw Exception("Anime details not found")
-
-        val titles = media.optJSONObject("title")
-        val studioNodes = media.optJSONObject("studios")
-            ?.optJSONArray("nodes")
-
-        val studio = if (studioNodes != null && studioNodes.length() > 0) {
-            studioNodes.getJSONObject(0).optString("name")
-        } else {
-            "Not available"
-        }
-
-        val characters = mutableListOf<CharacterInfo>()
-        val edges = media.optJSONObject("characters")?.optJSONArray("edges")
-
-        if (edges != null) {
-            for (i in 0 until edges.length()) {
-                val edge = edges.getJSONObject(i)
-                val node = edge.getJSONObject("node")
-                characters.add(
-                    CharacterInfo(
-                        name = node.optJSONObject("name")
-                            ?.optString("full").orEmpty(),
-                        image = node.optJSONObject("image")
-                            ?.optString("large").orEmpty(),
-                        role = edge.optString("role")
-                    )
-                )
-            }
-        }
-
-        AnimeDetails(
-            englishTitle = titles?.optString("english")
-                ?.takeIf { it.isNotBlank() && it != "null" }
-                ?: titles?.optString("romaji").orEmpty(),
-            japaneseTitle = titles?.optString("native").orEmpty(),
-            description = media.optString("description")
-                .takeIf { it.isNotBlank() && it != "null" }
-                ?: "Description not available.",
-            banner = media.optString("bannerImage")
-                .takeIf { it != "null" }.orEmpty(),
-            genres = media.optJSONArray("genres")?.let { array ->
-                (0 until array.length()).map { array.getString(it) }
-            } ?: emptyList(),
-            year = media.optString("seasonYear")
-                .takeIf { it != "null" } ?: "Unknown",
-            episodes = media.optString("episodes")
-                .takeIf { it != "null" } ?: "Unknown",
-            rating = media.optString("averageScore")
-                .takeIf { it != "null" }?.let { "$it/100" }
-                ?: "Not rated",
-            status = media.optString("status").replace("_", " "),
-            studio = studio,
-            characters = characters
-        )
+    val body = JSONObject().apply {
+        put("query", query)
+        put("variables", JSONObject().put("search", title))
     }
+
+    val response = request(
+        "https://graphql.anilist.co",
+        "POST",
+        body.toString()
+    )
+
+    val media = JSONObject(response)
+        .getJSONObject("data")
+        .optJSONObject("Media")
+        ?: throw Exception("Anime details not found")
+
+    val titles = media.optJSONObject("title")
+    val studioNodes = media.optJSONObject("studios")
+        ?.optJSONArray("nodes")
+
+    val studio = if (studioNodes != null && studioNodes.length() > 0) {
+        studioNodes.getJSONObject(0).optString("name")
+    } else {
+        "Not available"
+    }
+
+    val characters = mutableListOf<CharacterInfo>()
+    val edges = media.optJSONObject("characters")?.optJSONArray("edges")
+
+    if (edges != null) {
+        for (i in 0 until edges.length()) {
+            val edge = edges.getJSONObject(i)
+            val node = edge.getJSONObject("node")
+
+            characters.add(
+                CharacterInfo(
+                    name = node.optJSONObject("name")
+                        ?.optString("full").orEmpty(),
+                    image = node.optJSONObject("image")
+                        ?.optString("large").orEmpty(),
+                    role = edge.optString("role")
+                )
+            )
+        }
+    }
+
+    AnimeDetails(
+        englishTitle = titles?.optString("english")
+            ?.takeIf { it.isNotBlank() && it != "null" }
+            ?: titles?.optString("romaji").orEmpty(),
+        japaneseTitle = titles?.optString("native").orEmpty(),
+        description = media.optString("description")
+            .takeIf { it.isNotBlank() && it != "null" }
+            ?: "Description not available.",
+        banner = media.optString("bannerImage")
+            .takeIf { it != "null" }.orEmpty(),
+        genres = media.optJSONArray("genres")?.let { array ->
+            (0 until array.length()).map { array.getString(it) }
+        } ?: emptyList(),
+        year = media.optString("seasonYear")
+            .takeIf { it != "null" } ?: "Unknown",
+        episodes = media.optString("episodes")
+            .takeIf { it != "null" } ?: "Unknown",
+        rating = media.optString("averageScore")
+            .takeIf { it != "null" }?.let { "$it/100" }
+            ?: "Not rated",
+        status = media.optString("status").replace("_", " "),
+        studio = studio,
+        characters = characters
+    )
+}
 
 @Composable
 fun AniStreamApp() {
@@ -459,10 +466,12 @@ fun AniStreamApp() {
                             selectedAnime = it
                         }
                         2 -> SimpleScreen(
-                            "My List", "Your favourite anime will appear here"
+                            "My List",
+                            "Your favourite anime will appear here"
                         )
                         3 -> SimpleScreen(
-                            "My Profile", "Login to access your profile"
+                            "My Profile",
+                            "Login to access your profile"
                         )
                     }
                 } else {
@@ -1078,6 +1087,7 @@ fun PlayerScreen(
 
         try {
             servers = fetchVideoServers(episode.id)
+
             if (servers.isEmpty()) {
                 error = "Is Episode ke liye abhi video link add nahi hua."
             } else {
@@ -1088,6 +1098,7 @@ fun PlayerScreen(
                 val available = servers.filter {
                     it.language.equals(selectedLanguage, true)
                 }
+
                 selectedQuality = available.firstOrNull {
                     it.quality.equals("720p", true)
                 }?.quality ?: available.first().quality
@@ -1095,6 +1106,7 @@ fun PlayerScreen(
         } catch (e: Exception) {
             error = e.message ?: "Video links load nahi ho paye"
         }
+
         loading = false
     }
 
@@ -1115,189 +1127,281 @@ fun PlayerScreen(
         it.quality.equals(selectedQuality, true)
     } ?: languageServers.firstOrNull()
 
-    if (fullscreen) {
-        Box(
-            Modifier.fillMaxSize().background(Color.Black),
-            contentAlignment = Alignment.Center
-        ) {
-            if (selectedServer != null) {
-                VideoPlayerView(
-                    videoUrl = selectedServer.videoUrl,
-                    episodeId = episode.id,
-                    fullscreen = true,
-                    onToggleFullscreen = { fullscreen = false }
-                )
-            } else {
-                Text(error ?: "Video unavailable", color = White)
-            }
-        }
-        return
-    }
-
     Column(
         Modifier.fillMaxSize().background(Background)
-            .verticalScroll(rememberScrollState())
-    ) {
-        Text(
-            "‹  Back to Episodes",
-            color = White,
-            fontSize = 17.sp,
-            modifier = Modifier.clickable { onBack() }.padding(16.dp)
-        )
-        Text(
-            "AniStream Player",
-            color = AccentRed,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(horizontal = 16.dp)
-        )
-        Text(
-            "Episode ${episode.episodeNumber}: ${episode.title}",
-            color = White,
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(
-                start = 16.dp, end = 16.dp, top = 6.dp, bottom = 14.dp
+            .then(
+                if (fullscreen) Modifier
+                else Modifier.verticalScroll(rememberScrollState())
             )
-        )
+    ) {
+
+        if (!fullscreen) {
+            Row(
+                Modifier.fillMaxWidth()
+                    .background(SurfaceDark)
+                    .padding(horizontal = 16.dp, vertical = 13.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "‹",
+                    color = White,
+                    fontSize = 30.sp,
+                    modifier = Modifier.clickable { onBack() }
+                )
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "ANISTREAM PLAYER",
+                        color = AccentRed,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                    Text(
+                        "Now Watching",
+                        color = Gray,
+                        fontSize = 11.sp
+                    )
+                }
+                Surface(
+                    color = Color(0xFF29202A),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Text(
+                        "HD PLAYER",
+                        color = AccentRed,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(
+                            horizontal = 11.dp, vertical = 7.dp
+                        )
+                    )
+                }
+            }
+
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 15.dp)) {
+                Text(
+                    "Episode ${episode.episodeNumber}",
+                    color = AccentRed,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    episode.title.ifBlank {
+                        "Episode ${episode.episodeNumber}"
+                    },
+                    color = White,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+            }
+        }
 
         when {
             loading -> Box(
-                Modifier.fillMaxWidth().height(220.dp).background(Color.Black),
+                Modifier.fillMaxWidth()
+                    .height(if (fullscreen) 1.dp else 230.dp)
+                    .background(Color.Black),
                 contentAlignment = Alignment.Center
             ) {
                 CircularProgressIndicator(color = AccentRed)
             }
+
             error != null -> Box(
-                Modifier.fillMaxWidth().height(220.dp)
-                    .background(Color.Black).padding(20.dp),
+                Modifier.fillMaxWidth()
+                    .height(if (fullscreen) 1.dp else 230.dp)
+                    .background(Color.Black)
+                    .padding(20.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Text(error ?: "Video unavailable", color = White, fontSize = 14.sp)
-            }
-            selectedServer != null -> VideoPlayerView(
-                videoUrl = selectedServer.videoUrl,
-                episodeId = episode.id,
-                fullscreen = false,
-                onToggleFullscreen = { fullscreen = true }
-            )
-        }
-
-        if (servers.isNotEmpty()) {
-            Spacer(Modifier.height(18.dp))
-            Text(
-                "Video Settings",
-                color = White,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 16.dp)
-            )
-            Spacer(Modifier.height(12.dp))
-
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Box(Modifier.weight(1f)) {
-                    OutlinedButton(
-                        onClick = { languageMenu = true },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = White
-                        )
-                    ) {
-                        Text(selectedLanguage.ifBlank { "Language" })
-                    }
-                    DropdownMenu(
-                        expanded = languageMenu,
-                        onDismissRequest = { languageMenu = false }
-                    ) {
-                        servers.map { it.language }.distinct().forEach { language ->
-                            DropdownMenuItem(
-                                text = { Text(language) },
-                                onClick = {
-                                    selectedLanguage = language
-                                    val available = servers.filter {
-                                        it.language.equals(language, true)
-                                    }
-                                    selectedQuality = available.firstOrNull {
-                                        it.quality.equals("720p", true)
-                                    }?.quality ?: available.firstOrNull()?.quality.orEmpty()
-                                    languageMenu = false
-                                }
-                            )
-                        }
-                    }
-                }
-
-                Box(Modifier.weight(1f)) {
-                    OutlinedButton(
-                        onClick = { qualityMenu = true },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = White
-                        )
-                    ) {
-                        Text(selectedQuality.ifBlank { "Quality" })
-                    }
-                    DropdownMenu(
-                        expanded = qualityMenu,
-                        onDismissRequest = { qualityMenu = false }
-                    ) {
-                        qualities.forEach { quality ->
-                            DropdownMenuItem(
-                                text = { Text(quality) },
-                                onClick = {
-                                    selectedQuality = quality
-                                    qualityMenu = false
-                                }
-                            )
-                        }
-                    }
-                }
+                Text(error ?: "Video unavailable", color = White)
             }
 
-            selectedServer?.let {
-                Text(
-                    "Server: ${it.serverName}",
-                    color = Gray,
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(start = 16.dp, top = 10.dp)
+            selectedServer != null -> {
+                VideoPlayerView(
+                    videoUrl = selectedServer.videoUrl,
+                    episodeId = episode.id,
+                    fullscreen = fullscreen,
+                    onToggleFullscreen = {
+                        fullscreen = !fullscreen
+                    }
                 )
             }
         }
 
-        Spacer(Modifier.height(22.dp))
-        Text(
-            "Episode Navigation",
-            color = White,
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(horizontal = 16.dp)
-        )
-        Spacer(Modifier.height(10.dp))
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            OutlinedButton(
-                onClick = { onEpisodeChange(episodeIndex - 1) },
-                enabled = episodeIndex > 0,
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = White)
-            ) {
-                Text("← Previous")
-            }
-            Button(
-                onClick = { onEpisodeChange(episodeIndex + 1) },
-                enabled = episodeIndex >= 0 && episodeIndex < episodes.lastIndex,
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.buttonColors(containerColor = AccentRed)
-            ) {
-                Text("Next →")
+        if (!fullscreen && servers.isNotEmpty()) {
+            Column(Modifier.padding(16.dp)) {
+                Text(
+                    "PLAYBACK SETTINGS",
+                    color = Gray,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(Modifier.height(12.dp))
+
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("AUDIO LANGUAGE", color = Gray, fontSize = 10.sp)
+                        Spacer(Modifier.height(6.dp))
+                        Box {
+                            OutlinedButton(
+                                onClick = { languageMenu = true },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = White
+                                )
+                            ) {
+                                Text(
+                                    selectedLanguage.ifBlank { "Language" },
+                                    maxLines = 1
+                                )
+                            }
+
+                            DropdownMenu(
+                                expanded = languageMenu,
+                                onDismissRequest = { languageMenu = false }
+                            ) {
+                                servers.map { it.language }
+                                    .distinct().forEach { language ->
+                                        DropdownMenuItem(
+                                            text = { Text(language) },
+                                            onClick = {
+                                                selectedLanguage = language
+                                                val available = servers.filter {
+                                                    it.language.equals(language, true)
+                                                }
+                                                selectedQuality = available.firstOrNull {
+                                                    it.quality.equals("720p", true)
+                                                }?.quality
+                                                    ?: available.firstOrNull()
+                                                        ?.quality.orEmpty()
+                                                languageMenu = false
+                                            }
+                                        )
+                                    }
+                            }
+                        }
+                    }
+
+                    Column(Modifier.weight(1f)) {
+                        Text("VIDEO QUALITY", color = Gray, fontSize = 10.sp)
+                        Spacer(Modifier.height(6.dp))
+                        Box {
+                            OutlinedButton(
+                                onClick = { qualityMenu = true },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = White
+                                )
+                            ) {
+                                Text(selectedQuality.ifBlank { "Quality" })
+                            }
+
+                            DropdownMenu(
+                                expanded = qualityMenu,
+                                onDismissRequest = { qualityMenu = false }
+                            ) {
+                                qualities.forEach { quality ->
+                                    DropdownMenuItem(
+                                        text = { Text(quality) },
+                                        onClick = {
+                                            selectedQuality = quality
+                                            qualityMenu = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                selectedServer?.let {
+                    Surface(
+                        color = SurfaceDark,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            Modifier.padding(13.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("●", color = Color(0xFF31D68B))
+                            Spacer(Modifier.width(9.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    "Connected Server",
+                                    color = Gray,
+                                    fontSize = 10.sp
+                                )
+                                Text(
+                                    it.serverName,
+                                    color = White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Text(
+                                it.quality,
+                                color = AccentRed,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
             }
         }
-        Spacer(Modifier.height(25.dp))
+
+        if (!fullscreen) {
+            Column(Modifier.padding(horizontal = 16.dp)) {
+                Text(
+                    "EPISODE NAVIGATION",
+                    color = Gray,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(Modifier.height(12.dp))
+
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = { onEpisodeChange(episodeIndex - 1) },
+                        enabled = episodeIndex > 0,
+                        modifier = Modifier.weight(1f).height(48.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = White
+                        )
+                    ) {
+                        Text("← Previous")
+                    }
+
+                    Button(
+                        onClick = { onEpisodeChange(episodeIndex + 1) },
+                        enabled = episodeIndex >= 0 &&
+                            episodeIndex < episodes.lastIndex,
+                        modifier = Modifier.weight(1f).height(48.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AccentRed
+                        )
+                    ) {
+                        Text("Next Episode →")
+                    }
+                }
+
+                Spacer(Modifier.height(25.dp))
+            }
+        }
     }
 }
 
@@ -1316,6 +1420,8 @@ fun VideoPlayerView(
     }
     var speedMenu by remember { mutableStateOf(false) }
 
+    val currentSpeed by rememberUpdatedState(selectedSpeed)
+
     val exoPlayer = remember(context, episodeId) {
         ExoPlayer.Builder(context).build()
     }
@@ -1328,9 +1434,7 @@ fun VideoPlayerView(
 
     DisposableEffect(activity, fullscreen) {
         val window = activity?.window
-        val decorView = window?.decorView
         val oldOrientation = activity?.requestedOrientation
-        val oldSystemUi = decorView?.systemUiVisibility ?: 0
 
         if (fullscreen) {
             activity?.requestedOrientation =
@@ -1340,12 +1444,20 @@ fun VideoPlayerView(
                 WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
             )
 
-            decorView?.systemUiVisibility = (
-                View.SYSTEM_UI_FLAG_FULLSCREEN
-                    or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                    or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                    or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-            )
+            window?.let {
+                WindowCompat.setDecorFitsSystemWindows(it, false)
+
+                val controller = WindowInsetsControllerCompat(
+                    it,
+                    it.decorView
+                )
+
+                controller.systemBarsBehavior =
+                    WindowInsetsControllerCompat
+                        .BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+
+                controller.hide(WindowInsetsCompat.Type.systemBars())
+            }
         } else {
             activity?.requestedOrientation =
                 ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
@@ -1354,37 +1466,57 @@ fun VideoPlayerView(
                 WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
             )
 
-            decorView?.systemUiVisibility = oldSystemUi
+            window?.let {
+                WindowCompat.setDecorFitsSystemWindows(it, true)
+
+                WindowInsetsControllerCompat(
+                    it,
+                    it.decorView
+                ).show(WindowInsetsCompat.Type.systemBars())
+            }
         }
 
         onDispose {
             activity?.requestedOrientation =
-                ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                oldOrientation
+                    ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
 
             window?.clearFlags(
                 WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
             )
 
-            decorView?.systemUiVisibility = oldSystemUi
+            window?.let {
+                WindowCompat.setDecorFitsSystemWindows(it, true)
+
+                WindowInsetsControllerCompat(
+                    it,
+                    it.decorView
+                ).show(WindowInsetsCompat.Type.systemBars())
+            }
         }
     }
 
     LaunchedEffect(exoPlayer, videoUrl) {
-        exoPlayer.stop()
-        exoPlayer.clearMediaItems()
+        val oldPosition = if (exoPlayer.mediaItemCount > 0) {
+            exoPlayer.currentPosition
+        } else {
+            0L
+        }
+
         exoPlayer.setMediaItem(MediaItem.fromUri(videoUrl))
         exoPlayer.prepare()
+        exoPlayer.seekTo(oldPosition)
         exoPlayer.playWhenReady = true
         exoPlayer.playbackParameters =
             PlaybackParameters(selectedSpeed)
     }
 
-    Column(
-        Modifier
+    Box(
+        modifier = Modifier
             .fillMaxWidth()
             .then(
                 if (fullscreen) Modifier.fillMaxHeight()
-                else Modifier
+                else Modifier.height(235.dp)
             )
             .background(Color.Black)
     ) {
@@ -1393,6 +1525,7 @@ fun VideoPlayerView(
                 PlayerView(viewContext).apply {
                     useController = true
                     player = exoPlayer
+                    setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
 
                     val gestureDetector = GestureDetector(
                         viewContext,
@@ -1435,7 +1568,7 @@ fun VideoPlayerView(
                             event.action == MotionEvent.ACTION_CANCEL
                         ) {
                             exoPlayer.playbackParameters =
-                                PlaybackParameters(selectedSpeed)
+                                PlaybackParameters(currentSpeed)
                         }
 
                         false
@@ -1445,55 +1578,102 @@ fun VideoPlayerView(
             update = { playerView ->
                 playerView.player = exoPlayer
             },
-            modifier = Modifier
-                .fillMaxWidth()
-                .then(
-                    if (fullscreen) Modifier.weight(1f)
-                    else Modifier.height(230.dp)
-                )
-                .background(Color.Black)
+            modifier = Modifier.fillMaxSize()
         )
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(SurfaceDark)
-                .padding(horizontal = 10.dp, vertical = 5.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box {
-                TextButton(onClick = { speedMenu = true }) {
-                    Text(
-                        "${selectedSpeed}x Speed",
-                        color = AccentRed,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                DropdownMenu(
-                    expanded = speedMenu,
-                    onDismissRequest = { speedMenu = false }
-                ) {
-                    listOf(0.5f, 1f, 1.25f, 1.5f, 2f).forEach { speed ->
-                        DropdownMenuItem(
-                            text = { Text("${speed}x") },
-                            onClick = {
-                                selectedSpeed = speed
-                                exoPlayer.playbackParameters =
-                                    PlaybackParameters(speed)
-                                speedMenu = false
-                            }
+        if (fullscreen) {
+            Row(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .background(Color.Black.copy(alpha = 0.72f))
+                    .padding(horizontal = 12.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Box {
+                    TextButton(onClick = { speedMenu = true }) {
+                        Text(
+                            "${selectedSpeed}x",
+                            color = White,
+                            fontWeight = FontWeight.Bold
                         )
                     }
+
+                    DropdownMenu(
+                        expanded = speedMenu,
+                        onDismissRequest = { speedMenu = false }
+                    ) {
+                        listOf(0.5f, 1f, 1.25f, 1.5f, 2f).forEach { speed ->
+                            DropdownMenuItem(
+                                text = { Text("${speed}x Speed") },
+                                onClick = {
+                                    selectedSpeed = speed
+                                    exoPlayer.playbackParameters =
+                                        PlaybackParameters(speed)
+                                    speedMenu = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                Text(
+                    "Swipe for system controls",
+                    color = Gray,
+                    fontSize = 10.sp
+                )
+
+                TextButton(onClick = onToggleFullscreen) {
+                    Text("✕ Exit", color = White, fontWeight = FontWeight.Bold)
                 }
             }
+        } else {
+            Row(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .background(Color.Black.copy(alpha = 0.78f))
+                    .padding(horizontal = 10.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Box {
+                    TextButton(onClick = { speedMenu = true }) {
+                        Text(
+                            "⚡ ${selectedSpeed}x",
+                            color = White,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
 
-            TextButton(onClick = onToggleFullscreen) {
+                    DropdownMenu(
+                        expanded = speedMenu,
+                        onDismissRequest = { speedMenu = false }
+                    ) {
+                        listOf(0.5f, 1f, 1.25f, 1.5f, 2f).forEach { speed ->
+                            DropdownMenuItem(
+                                text = { Text("${speed}x Speed") },
+                                onClick = {
+                                    selectedSpeed = speed
+                                    exoPlayer.playbackParameters =
+                                        PlaybackParameters(speed)
+                                    speedMenu = false
+                                }
+                            )
+                        }
+                    }
+                }
+
                 Text(
-                    if (fullscreen) "Exit Fullscreen" else "⛶ Fullscreen",
-                    color = White
+                    "Double tap: ±10 sec",
+                    color = Gray,
+                    fontSize = 10.sp
                 )
+
+                TextButton(onClick = onToggleFullscreen) {
+                    Text("⛶ Fullscreen", color = AccentRed)
+                }
             }
         }
     }
