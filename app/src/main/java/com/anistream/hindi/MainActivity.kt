@@ -2,8 +2,15 @@
 package com.anistream.hindi
 
 import android.os.Bundle
+import android.app.Activity
+import android.content.pm.ActivityInfo
+import android.view.GestureDetector
+import android.view.MotionEvent
+import android.view.View
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -24,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
@@ -100,7 +108,9 @@ data class AnimeDetails(
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { AniStreamApp() }
+        setContent {
+            AniStreamApp()
+        }
     }
 }
 
@@ -363,6 +373,13 @@ fun AniStreamApp() {
     var error by remember { mutableStateOf<String?>(null) }
     var searchText by remember { mutableStateOf("") }
     var selectedAnime by remember { mutableStateOf<Anime?>(null) }
+
+    BackHandler(
+        enabled = selectedAnime == null && selectedTab != 0
+    ) {
+        selectedTab = 0
+        searchText = ""
+    }
 
     LaunchedEffect(Unit) {
         try {
@@ -696,6 +713,14 @@ fun AnimeDetailsScreen(anime: Anime, onBack: () -> Unit) {
         mutableStateOf<AnimeEpisode?>(null)
     }
 
+    BackHandler {
+        if (playingEpisode != null) {
+            playingEpisode = null
+        } else {
+            onBack()
+        }
+    }
+
     LaunchedEffect(anime.id) {
         try {
             details = fetchAnimeDetails(anime.title)
@@ -796,7 +821,11 @@ fun AnimeDetailsScreen(anime: Anime, onBack: () -> Unit) {
                     fontWeight = FontWeight.ExtraBold
                 )
                 Spacer(Modifier.height(7.dp))
-                Text(details?.japaneseTitle.orEmpty(), color = Gray, fontSize = 12.sp)
+                Text(
+                    details?.japaneseTitle.orEmpty(),
+                    color = Gray,
+                    fontSize = 12.sp
+                )
                 Spacer(Modifier.height(10.dp))
                 Text(
                     "⭐ ${details?.rating ?: "Loading..."}",
@@ -804,8 +833,16 @@ fun AnimeDetailsScreen(anime: Anime, onBack: () -> Unit) {
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold
                 )
-                Text("Year: ${details?.year ?: "Loading..."}", color = Gray, fontSize = 12.sp)
-                Text("Episodes: ${details?.episodes ?: "Loading..."}", color = Gray, fontSize = 12.sp)
+                Text(
+                    "Year: ${details?.year ?: "Loading..."}",
+                    color = Gray,
+                    fontSize = 12.sp
+                )
+                Text(
+                    "Episodes: ${details?.episodes ?: "Loading..."}",
+                    color = Gray,
+                    fontSize = 12.sp
+                )
             }
         }
 
@@ -873,7 +910,11 @@ fun AnimeDetailsScreen(anime: Anime, onBack: () -> Unit) {
                                         fontWeight = FontWeight.Bold,
                                         maxLines = 2
                                     )
-                                    Text(character.role, color = Gray, fontSize = 10.sp)
+                                    Text(
+                                        character.role,
+                                        color = Gray,
+                                        fontSize = 10.sp
+                                    )
                                 }
                             }
                         }
@@ -1023,11 +1064,18 @@ fun PlayerScreen(
     var selectedQuality by remember(episode.id) { mutableStateOf("720p") }
     var languageMenu by remember { mutableStateOf(false) }
     var qualityMenu by remember { mutableStateOf(false) }
+    var fullscreen by remember { mutableStateOf(false) }
+
+    BackHandler(enabled = fullscreen) {
+        fullscreen = false
+    }
 
     LaunchedEffect(episode.id) {
         loading = true
         error = null
         servers = emptyList()
+        fullscreen = false
+
         try {
             servers = fetchVideoServers(episode.id)
             if (servers.isEmpty()) {
@@ -1053,16 +1101,38 @@ fun PlayerScreen(
     val languageServers = servers.filter {
         it.language.equals(selectedLanguage, true)
     }
+
     val qualityOrder = listOf("1080p", "720p", "480p")
     val qualities = languageServers.map { it.quality }
         .distinct()
-        .sortedBy { qualityOrder.indexOf(it).let { index ->
-            if (index < 0) Int.MAX_VALUE else index
-        } }
+        .sortedBy {
+            qualityOrder.indexOf(it).let { index ->
+                if (index < 0) Int.MAX_VALUE else index
+            }
+        }
 
     val selectedServer = languageServers.firstOrNull {
         it.quality.equals(selectedQuality, true)
     } ?: languageServers.firstOrNull()
+
+    if (fullscreen) {
+        Box(
+            Modifier.fillMaxSize().background(Color.Black),
+            contentAlignment = Alignment.Center
+        ) {
+            if (selectedServer != null) {
+                VideoPlayerView(
+                    videoUrl = selectedServer.videoUrl,
+                    episodeId = episode.id,
+                    fullscreen = true,
+                    onToggleFullscreen = { fullscreen = false }
+                )
+            } else {
+                Text(error ?: "Video unavailable", color = White)
+            }
+        }
+        return
+    }
 
     Column(
         Modifier.fillMaxSize().background(Background)
@@ -1107,7 +1177,9 @@ fun PlayerScreen(
             }
             selectedServer != null -> VideoPlayerView(
                 videoUrl = selectedServer.videoUrl,
-                episodeId = episode.id
+                episodeId = episode.id,
+                fullscreen = false,
+                onToggleFullscreen = { fullscreen = true }
             )
         }
 
@@ -1230,8 +1302,19 @@ fun PlayerScreen(
 }
 
 @Composable
-fun VideoPlayerView(videoUrl: String, episodeId: String) {
+fun VideoPlayerView(
+    videoUrl: String,
+    episodeId: String,
+    fullscreen: Boolean,
+    onToggleFullscreen: () -> Unit
+) {
     val context = LocalContext.current
+    val activity = context as? Activity
+
+    var selectedSpeed by remember(episodeId) {
+        mutableFloatStateOf(1f)
+    }
+    var speedMenu by remember { mutableStateOf(false) }
 
     val exoPlayer = remember(context, episodeId) {
         ExoPlayer.Builder(context).build()
@@ -1243,28 +1326,177 @@ fun VideoPlayerView(videoUrl: String, episodeId: String) {
         }
     }
 
+    DisposableEffect(activity, fullscreen) {
+        val window = activity?.window
+        val decorView = window?.decorView
+        val oldOrientation = activity?.requestedOrientation
+        val oldSystemUi = decorView?.systemUiVisibility ?: 0
+
+        if (fullscreen) {
+            activity?.requestedOrientation =
+                ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+
+            window?.addFlags(
+                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+            )
+
+            decorView?.systemUiVisibility = (
+                View.SYSTEM_UI_FLAG_FULLSCREEN
+                    or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            )
+        } else {
+            activity?.requestedOrientation =
+                ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+
+            window?.clearFlags(
+                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+            )
+
+            decorView?.systemUiVisibility = oldSystemUi
+        }
+
+        onDispose {
+            activity?.requestedOrientation =
+                ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+
+            window?.clearFlags(
+                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+            )
+
+            decorView?.systemUiVisibility = oldSystemUi
+        }
+    }
+
     LaunchedEffect(exoPlayer, videoUrl) {
         exoPlayer.stop()
         exoPlayer.clearMediaItems()
         exoPlayer.setMediaItem(MediaItem.fromUri(videoUrl))
         exoPlayer.prepare()
         exoPlayer.playWhenReady = true
+        exoPlayer.playbackParameters =
+            PlaybackParameters(selectedSpeed)
     }
 
-    AndroidView(
-        factory = { viewContext ->
-            PlayerView(viewContext).apply {
-                useController = true
-                player = exoPlayer
-            }
-        },
-        update = { playerView ->
-            playerView.player = exoPlayer
-        },
-        modifier = Modifier.fillMaxWidth()
-            .height(230.dp)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .then(
+                if (fullscreen) Modifier.fillMaxHeight()
+                else Modifier
+            )
             .background(Color.Black)
-    )
+    ) {
+        AndroidView(
+            factory = { viewContext ->
+                PlayerView(viewContext).apply {
+                    useController = true
+                    player = exoPlayer
+
+                    val gestureDetector = GestureDetector(
+                        viewContext,
+                        object : GestureDetector.SimpleOnGestureListener() {
+
+                            override fun onDown(
+                                event: MotionEvent
+                            ): Boolean {
+                                return true
+                            }
+
+                            override fun onDoubleTap(
+                                event: MotionEvent
+                            ): Boolean {
+                                val forward = event.x > width / 2f
+                                val jump = if (forward) 10000L else -10000L
+
+                                val newPosition = (
+                                    exoPlayer.currentPosition + jump
+                                ).coerceAtLeast(0L)
+
+                                exoPlayer.seekTo(newPosition)
+                                return true
+                            }
+
+                            override fun onLongPress(
+                                event: MotionEvent
+                            ) {
+                                exoPlayer.playbackParameters =
+                                    PlaybackParameters(2f)
+                            }
+                        }
+                    )
+
+                    setOnTouchListener { _, event ->
+                        gestureDetector.onTouchEvent(event)
+
+                        if (
+                            event.action == MotionEvent.ACTION_UP ||
+                            event.action == MotionEvent.ACTION_CANCEL
+                        ) {
+                            exoPlayer.playbackParameters =
+                                PlaybackParameters(selectedSpeed)
+                        }
+
+                        false
+                    }
+                }
+            },
+            update = { playerView ->
+                playerView.player = exoPlayer
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (fullscreen) Modifier.weight(1f)
+                    else Modifier.height(230.dp)
+                )
+                .background(Color.Black)
+        )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(SurfaceDark)
+                .padding(horizontal = 10.dp, vertical = 5.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box {
+                TextButton(onClick = { speedMenu = true }) {
+                    Text(
+                        "${selectedSpeed}x Speed",
+                        color = AccentRed,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                DropdownMenu(
+                    expanded = speedMenu,
+                    onDismissRequest = { speedMenu = false }
+                ) {
+                    listOf(0.5f, 1f, 1.25f, 1.5f, 2f).forEach { speed ->
+                        DropdownMenuItem(
+                            text = { Text("${speed}x") },
+                            onClick = {
+                                selectedSpeed = speed
+                                exoPlayer.playbackParameters =
+                                    PlaybackParameters(speed)
+                                speedMenu = false
+                            }
+                        )
+                    }
+                }
+            }
+
+            TextButton(onClick = onToggleFullscreen) {
+                Text(
+                    if (fullscreen) "Exit Fullscreen" else "⛶ Fullscreen",
+                    color = White
+                )
+            }
+        }
+    }
 }
 
 @Composable
