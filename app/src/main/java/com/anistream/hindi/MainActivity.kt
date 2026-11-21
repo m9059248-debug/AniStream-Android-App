@@ -56,6 +56,7 @@ import java.net.URL
 private const val SUPABASE_URL = "https://cyftkgouolxcverswvpv.supabase.co"
 private const val SUPABASE_KEY = "sb_publishable_h-Alm01lWCWvvlWcW-Uqyg_iAub4QH3"
 private const val AUTH_PREFS = "anistream_auth_prefs"
+private const val MY_LIST_PREFS = "anistream_my_list_prefs"
 
 private val Background = Color(0xFF08090D)
 private val SurfaceDark = Color(0xFF14151C)
@@ -94,7 +95,8 @@ private fun request(
     method: String = "GET",
     body: String? = null,
     supabase: Boolean = false,
-    bearerToken: String? = null
+    bearerToken: String? = null,
+    extraHeaders: Map<String, String> = emptyMap()
 ): String {
     val connection = URL(url).openConnection() as HttpURLConnection
     try {
@@ -106,6 +108,7 @@ private fun request(
             connection.setRequestProperty("apikey", SUPABASE_KEY)
             connection.setRequestProperty("Authorization", "Bearer ${bearerToken ?: SUPABASE_KEY}")
         }
+        extraHeaders.forEach { (k, v) -> connection.setRequestProperty(k, v) }
         if (body != null) {
             connection.doOutput = true
             connection.setRequestProperty("Content-Type", "application/json")
@@ -153,6 +156,97 @@ private fun loadUserSession(context: Context): UserSession? {
 
 private fun clearUserSession(context: Context) {
     context.getSharedPreferences(AUTH_PREFS, Context.MODE_PRIVATE).edit().clear().apply()
+}
+
+private fun myListKey(userId: String?): String =
+    if (userId.isNullOrBlank()) "guest_my_list" else "user_my_list_$userId"
+
+private fun loadLocalMyList(context: Context, userId: String?): Set<String> {
+    val prefs = context.getSharedPreferences(MY_LIST_PREFS, Context.MODE_PRIVATE)
+    return prefs.getStringSet(myListKey(userId), emptySet())?.toSet() ?: emptySet()
+}
+
+private fun saveLocalMyList(context: Context, userId: String?, ids: Set<String>) {
+    context.getSharedPreferences(MY_LIST_PREFS, Context.MODE_PRIVATE).edit()
+        .putStringSet(myListKey(userId), ids)
+        .apply()
+}
+
+private suspend fun supabaseFetchMyList(session: UserSession): Set<String> = withContext(Dispatchers.IO) {
+    val combined = mutableSetOf<String>()
+    // 1. Try reading from dedicated Supabase `my_list` table
+    runCatching {
+        val url = "$SUPABASE_URL/rest/v1/my_list?select=anime_id&user_id=eq.${Uri.encode(session.userId)}&order=created_at.desc"
+        val res = request(url, method = "GET", supabase = true, bearerToken = session.accessToken)
+        val arr = JSONArray(res)
+        for (i in 0 until arr.length()) {
+            val id = arr.getJSONObject(i).optString("anime_id")
+            if (id.isNotBlank() && id != "null") combined.add(id)
+        }
+    }
+    // 2. Also read from Supabase Auth `user_metadata.my_list` as backup
+    runCatching {
+        val res = request("$SUPABASE_URL/auth/v1/user", method = "GET", supabase = true, bearerToken = session.accessToken)
+        val userObj = JSONObject(res)
+        val metaList = userObj.optJSONObject("user_metadata")?.optJSONArray("my_list")
+        if (metaList != null) {
+            for (i in 0 until metaList.length()) {
+                val id = metaList.optString(i)
+                if (id.isNotBlank() && id != "null") combined.add(id)
+            }
+        }
+    }
+    combined
+}
+
+private suspend fun supabaseSyncMyListMetadata(session: UserSession, allIds: Set<String>) = withContext(Dispatchers.IO) {
+    runCatching {
+        val body = JSONObject().apply {
+            put("data", JSONObject().put("my_list", JSONArray(allIds.toList())))
+        }
+        request(
+            "$SUPABASE_URL/auth/v1/user",
+            method = "PUT",
+            body = body.toString(),
+            supabase = true,
+            bearerToken = session.accessToken
+        )
+    }
+}
+
+private suspend fun supabaseAddToMyList(session: UserSession, animeId: String, allIds: Set<String>) = withContext(Dispatchers.IO) {
+    // 1. Insert into Supabase `my_list` table if present
+    runCatching {
+        val payload = JSONObject().apply {
+            put("user_id", session.userId)
+            put("anime_id", animeId)
+        }
+        request(
+            "$SUPABASE_URL/rest/v1/my_list",
+            method = "POST",
+            body = payload.toString(),
+            supabase = true,
+            bearerToken = session.accessToken,
+            extraHeaders = mapOf("Prefer" to "resolution=merge-duplicates,return=minimal")
+        )
+    }
+    // 2. Sync with Supabase Auth metadata so it always works even without custom SQL table
+    supabaseSyncMyListMetadata(session, allIds)
+}
+
+private suspend fun supabaseRemoveFromMyList(session: UserSession, animeId: String, allIds: Set<String>) = withContext(Dispatchers.IO) {
+    // 1. Delete from Supabase `my_list` table if present
+    runCatching {
+        val url = "$SUPABASE_URL/rest/v1/my_list?user_id=eq.${Uri.encode(session.userId)}&anime_id=eq.${Uri.encode(animeId)}"
+        request(
+            url,
+            method = "DELETE",
+            supabase = true,
+            bearerToken = session.accessToken
+        )
+    }
+    // 2. Sync updated list with Supabase Auth metadata
+    supabaseSyncMyListMetadata(session, allIds)
 }
 
 private fun parseUserSession(root: JSONObject, fallbackToken: String = ""): UserSession {
@@ -359,6 +453,7 @@ private fun readDownloads(context: Context): List<DownloadInfo> {
 @Composable
 fun AniStreamApp() {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var tab by remember { mutableIntStateOf(0) }
     var animeList by remember { mutableStateOf<List<Anime>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
@@ -367,6 +462,46 @@ fun AniStreamApp() {
     var selectedAnime by remember { mutableStateOf<Anime?>(null) }
     var offlineDownload by remember { mutableStateOf<DownloadInfo?>(null) }
     var userSession by remember { mutableStateOf(loadUserSession(context)) }
+    var myListIds by remember { mutableStateOf(loadLocalMyList(context, userSession?.userId)) }
+    var myListSyncing by remember { mutableStateOf(false) }
+
+    fun toggleMyList(animeId: String) {
+        val currentlySaved = myListIds.contains(animeId)
+        val updated = if (currentlySaved) myListIds - animeId else myListIds + animeId
+        myListIds = updated
+        saveLocalMyList(context, userSession?.userId, updated)
+        val currentSession = userSession
+        if (currentSession != null) {
+            scope.launch {
+                myListSyncing = true
+                if (currentlySaved) {
+                    supabaseRemoveFromMyList(currentSession, animeId, updated)
+                } else {
+                    supabaseAddToMyList(currentSession, animeId, updated)
+                }
+                myListSyncing = false
+            }
+        }
+    }
+
+    fun syncMyListFromCloud() {
+        val currentSession = userSession ?: return
+        scope.launch {
+            myListSyncing = true
+            val localIds = loadLocalMyList(context, currentSession.userId)
+            val guestIds = loadLocalMyList(context, null)
+            val cloudIds = supabaseFetchMyList(currentSession)
+            val merged = localIds + guestIds + cloudIds
+            myListIds = merged
+            saveLocalMyList(context, currentSession.userId, merged)
+            if (merged != cloudIds) {
+                merged.subtract(cloudIds).forEach { id ->
+                    supabaseAddToMyList(currentSession, id, merged)
+                }
+            }
+            myListSyncing = false
+        }
+    }
 
     LaunchedEffect(Unit) {
         try { animeList = fetchAnime() } catch (e: Exception) { error = e.message ?: "Unable to load anime" }
@@ -374,7 +509,13 @@ fun AniStreamApp() {
     }
 
     LaunchedEffect(userSession?.accessToken) {
-        val current = userSession ?: return@LaunchedEffect
+        val current = userSession
+        if (current == null) {
+            myListIds = loadLocalMyList(context, null)
+            return@LaunchedEffect
+        }
+        myListIds = loadLocalMyList(context, current.userId)
+        syncMyListFromCloud()
         runCatching {
             val refreshed = supabaseFetchProfile(current)
             userSession = refreshed
@@ -415,7 +556,12 @@ fun AniStreamApp() {
             Column(Modifier.fillMaxSize().background(Background).padding(padding)) {
                 when {
                     offlineDownload != null -> LocalDownloadedPlayer(offlineDownload!!, onBack = { offlineDownload = null })
-                    selectedAnime != null -> AnimeDetailsScreen(selectedAnime!!, onBack = { selectedAnime = null })
+                    selectedAnime != null -> AnimeDetailsScreen(
+                        anime = selectedAnime!!,
+                        isInMyList = myListIds.contains(selectedAnime!!.id),
+                        onToggleMyList = { toggleMyList(selectedAnime!!.id) },
+                        onBack = { selectedAnime = null }
+                    )
                     else -> {
                         Row(
                             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
@@ -432,19 +578,40 @@ fun AniStreamApp() {
                                 loading = loading,
                                 error = error,
                                 userSession = userSession,
+                                myListIds = myListIds,
+                                onToggleMyList = { toggleMyList(it.id) },
                                 onProfileClick = { tab = 4 },
                                 onAnimeClick = { selectedAnime = it }
                             )
-                            1 -> SearchScreen(animeList, search, { search = it }) { selectedAnime = it }
-                            2 -> SimpleScreen("My List", "Your favourite anime will appear here")
+                            1 -> SearchScreen(
+                                animeList = animeList,
+                                searchText = search,
+                                myListIds = myListIds,
+                                onToggleMyList = { toggleMyList(it.id) },
+                                onSearchChange = { search = it },
+                                onAnimeClick = { selectedAnime = it }
+                            )
+                            2 -> MyListScreen(
+                                animeList = animeList,
+                                myListIds = myListIds,
+                                userSession = userSession,
+                                syncing = myListSyncing,
+                                onSyncClick = { syncMyListFromCloud() },
+                                onRemoveClick = { toggleMyList(it.id) },
+                                onAnimeClick = { selectedAnime = it },
+                                onExploreClick = { tab = 0 },
+                                onLoginClick = { tab = 4 }
+                            )
                             3 -> DownloadsScreen { offlineDownload = it }
                             4 -> ProfileScreen(
                                 session = userSession,
+                                myListCount = myListIds.size,
                                 onSessionUpdated = { newSession ->
                                     userSession = newSession
                                     if (newSession != null) saveUserSession(context, newSession)
                                     else clearUserSession(context)
                                 },
+                                onOpenMyList = { tab = 2 },
                                 onOpenDownloads = { tab = 3 }
                             )
                         }
@@ -456,9 +623,150 @@ fun AniStreamApp() {
 }
 
 @Composable
+fun MyListScreen(
+    animeList: List<Anime>,
+    myListIds: Set<String>,
+    userSession: UserSession?,
+    syncing: Boolean,
+    onSyncClick: () -> Unit,
+    onRemoveClick: (Anime) -> Unit,
+    onAnimeClick: (Anime) -> Unit,
+    onExploreClick: () -> Unit,
+    onLoginClick: () -> Unit
+) {
+    val savedAnime = animeList.filter { myListIds.contains(it.id) }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("My List", color = White, fontSize = 23.sp, fontWeight = FontWeight.ExtraBold)
+                Text(
+                    if (userSession != null) "Synced with Supabase • ${savedAnime.size} Anime"
+                    else "Saved on device • ${savedAnime.size} Anime",
+                    color = if (userSession != null) Color(0xFF4CAF50) else Gray,
+                    fontSize = 11.sp
+                )
+            }
+            if (userSession != null) {
+                SmallOutlineButton(
+                    text = if (syncing) "Syncing..." else "↻  Sync",
+                    onClick = onSyncClick,
+                    enabled = !syncing
+                )
+            } else {
+                SmallOutlineButton(
+                    text = "Login to Sync",
+                    onClick = onLoginClick
+                )
+            }
+        }
+
+        Spacer(Modifier.height(14.dp))
+
+        if (savedAnime.isEmpty()) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 48.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(SurfaceDark)
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text("♡", color = AccentRed, fontSize = 38.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+                Text("Your My List is Empty", color = White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Kisi bhi Anime par 'Add to My List' dabayein taaki aap use baad mein aasani se dekh sakein.",
+                    color = Gray,
+                    fontSize = 12.sp
+                )
+                Spacer(Modifier.height(16.dp))
+                Button(
+                    onClick = onExploreClick,
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentRed, contentColor = White)
+                ) {
+                    Text("EXPLORE ANIME", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
+                }
+            }
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                savedAnime.forEach { anime ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(SurfaceDark)
+                            .clickable { onAnimeClick(anime) }
+                            .padding(11.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        AsyncImage(
+                            anime.posterUrl,
+                            anime.title,
+                            Modifier
+                                .size(78.dp, 106.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Background),
+                            contentScale = ContentScale.Crop
+                        )
+                        Spacer(Modifier.width(13.dp))
+                        Column(Modifier.weight(1f)) {
+                            Surface(
+                                color = if (anime.animeType.equals("Movie", true)) AccentRed else Color(0xFF282A36),
+                                shape = RoundedCornerShape(5.dp)
+                            ) {
+                                Text(
+                                    anime.animeType.ifBlank { "Series" }.uppercase(),
+                                    color = White,
+                                    fontSize = 8.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                                )
+                            }
+                            Spacer(Modifier.height(6.dp))
+                            Text(anime.title, color = White, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, maxLines = 2)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                anime.description.ifBlank { "Watch on AniStream Hindi" }.replace(Regex("\\<[^\\>]*\\>"), ""),
+                                color = Gray,
+                                fontSize = 11.sp,
+                                maxLines = 2
+                            )
+                            Spacer(Modifier.height(9.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                SmallOutlineButton(
+                                    text = "▶  Watch",
+                                    onClick = { onAnimeClick(anime) },
+                                    selected = true
+                                )
+                                SmallOutlineButton(
+                                    text = "✕  Remove",
+                                    onClick = { onRemoveClick(anime) }
+                                )
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+            }
+        }
+    }
+}
+
+@Composable
 fun ProfileScreen(
     session: UserSession?,
+    myListCount: Int,
     onSessionUpdated: (UserSession?) -> Unit,
+    onOpenMyList: () -> Unit,
     onOpenDownloads: () -> Unit
 ) {
     val context = LocalContext.current
@@ -494,8 +802,8 @@ fun ProfileScreen(
                 fontWeight = FontWeight.ExtraBold
             )
             Text(
-                if (isSignUp) "Sign up with Supabase to sync your profile & list."
-                else "Login to access your AniStream Hindi profile.",
+                if (isSignUp) "Sign up with Supabase to sync your profile & My List."
+                else "Login to access your AniStream Hindi profile & cloud My List.",
                 color = Gray,
                 fontSize = 12.sp
             )
@@ -764,7 +1072,7 @@ fun ProfileScreen(
                 InfoLine("Email", session.email)
                 InfoLine("User ID", session.userId.ifBlank { "N/A" })
                 InfoLine("Joined On", session.createdAt.ifBlank { "Active" })
-                InfoLine("Auth Server", "Supabase Auth")
+                InfoLine("My List Saved", "$myListCount Anime")
                 InfoLine("Saved Downloads", "$downloadsCount Episodes")
             }
 
@@ -779,32 +1087,40 @@ fun ProfileScreen(
 
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                 SmallOutlineButton(
-                    text = "↻  Sync Profile",
-                    onClick = {
-                        loading = true
-                        errorMsg = null
-                        infoMsg = null
-                        scope.launch {
-                            try {
-                                val refreshed = supabaseFetchProfile(session)
-                                onSessionUpdated(refreshed)
-                                infoMsg = "Profile details sync ho gayi hain."
-                            } catch (e: Exception) {
-                                errorMsg = e.message ?: "Sync fail ho gaya."
-                            } finally {
-                                loading = false
-                            }
-                        }
-                    },
-                    modifier = Modifier.weight(1f),
-                    enabled = !loading
+                    text = "♡  My List ($myListCount)",
+                    onClick = onOpenMyList,
+                    modifier = Modifier.weight(1f)
                 )
                 SmallOutlineButton(
-                    text = "↓  My Downloads",
+                    text = "↓  Downloads",
                     onClick = onOpenDownloads,
                     modifier = Modifier.weight(1f)
                 )
             }
+
+            Spacer(Modifier.height(10.dp))
+
+            SmallOutlineButton(
+                text = "↻  Sync Profile & Cloud Data",
+                onClick = {
+                    loading = true
+                    errorMsg = null
+                    infoMsg = null
+                    scope.launch {
+                        try {
+                            val refreshed = supabaseFetchProfile(session)
+                            onSessionUpdated(refreshed)
+                            infoMsg = "Profile details sync ho gayi hain."
+                        } catch (e: Exception) {
+                            errorMsg = e.message ?: "Sync fail ho gaya."
+                        } finally {
+                            loading = false
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !loading
+            )
 
             Spacer(Modifier.height(14.dp))
 
@@ -838,6 +1154,8 @@ fun HomeScreen(
     loading: Boolean,
     error: String?,
     userSession: UserSession?,
+    myListIds: Set<String>,
+    onToggleMyList: (Anime) -> Unit,
     onProfileClick: () -> Unit,
     onAnimeClick: (Anime) -> Unit
 ) {
@@ -880,7 +1198,8 @@ fun HomeScreen(
                 Text("No published anime found yet.", color = Gray, fontSize = 13.sp)
             }
             else -> {
-                Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(224.dp).clip(RoundedCornerShape(22.dp)).background(SurfaceDark).clickable { onAnimeClick(featured) }) {
+                val isFeaturedSaved = myListIds.contains(featured.id)
+                Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(228.dp).clip(RoundedCornerShape(22.dp)).background(SurfaceDark).clickable { onAnimeClick(featured) }) {
                     AsyncImage(featured.posterUrl, featured.title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                     Box(Modifier.fillMaxSize().background(Color(0xCC050509)))
                     Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(18.dp)) {
@@ -890,10 +1209,25 @@ fun HomeScreen(
                         Spacer(Modifier.height(9.dp))
                         Text(featured.title, color = White, fontSize = 23.sp, fontWeight = FontWeight.ExtraBold, maxLines = 2)
                         Spacer(Modifier.height(5.dp))
-                        Text(featured.description.ifBlank { "Explore this anime on AniStream Hindi." }.replace(Regex("<[^>]*>"), ""), color = Color(0xFFD0D0D5), fontSize = 11.sp, maxLines = 2)
+                        Text(featured.description.ifBlank { "Explore this anime on AniStream Hindi." }.replace(Regex("\\<[^\\>]*\\>"), ""), color = Color(0xFFD0D0D5), fontSize = 11.sp, maxLines = 2)
                         Spacer(Modifier.height(12.dp))
-                        Surface(color = White, shape = RoundedCornerShape(8.dp), modifier = Modifier.clickable { onAnimeClick(featured) }) {
-                            Text("▶  VIEW DETAILS", color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(horizontal = 13.dp, vertical = 9.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Surface(color = White, shape = RoundedCornerShape(8.dp), modifier = Modifier.clickable { onAnimeClick(featured) }) {
+                                Text("▶  VIEW DETAILS", color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(horizontal = 13.dp, vertical = 9.dp))
+                            }
+                            Surface(
+                                color = if (isFeaturedSaved) AccentRed else Color(0xFF252733),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.clickable { onToggleMyList(featured) }
+                            ) {
+                                Text(
+                                    if (isFeaturedSaved) "✓  IN MY LIST" else "+  MY LIST",
+                                    color = White,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    modifier = Modifier.padding(horizontal = 13.dp, vertical = 9.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -943,7 +1277,14 @@ fun AnimeCard(anime: Anime, onClick: () -> Unit) {
 }
 
 @Composable
-fun SearchScreen(animeList: List<Anime>, searchText: String, onSearchChange: (String) -> Unit, onAnimeClick: (Anime) -> Unit) {
+fun SearchScreen(
+    animeList: List<Anime>,
+    searchText: String,
+    myListIds: Set<String>,
+    onToggleMyList: (Anime) -> Unit,
+    onSearchChange: (String) -> Unit,
+    onAnimeClick: (Anime) -> Unit
+) {
     val filtered = animeList.filter { it.title.contains(searchText, true) }
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         Text("Search Anime", color = White, fontSize = 23.sp, fontWeight = FontWeight.Bold)
@@ -959,18 +1300,47 @@ fun SearchScreen(animeList: List<Anime>, searchText: String, onSearchChange: (St
         Spacer(Modifier.height(14.dp))
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(11.dp)) {
             filtered.forEach { anime ->
-                Row(Modifier.fillMaxWidth().clickable { onAnimeClick(anime) }, verticalAlignment = Alignment.CenterVertically) {
-                    AsyncImage(anime.posterUrl, anime.title, Modifier.size(70.dp, 92.dp).clip(RoundedCornerShape(9.dp)).background(SurfaceDark), contentScale = ContentScale.Crop)
+                val isSaved = myListIds.contains(anime.id)
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(SurfaceDark)
+                        .clickable { onAnimeClick(anime) }
+                        .padding(9.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    AsyncImage(
+                        anime.posterUrl,
+                        anime.title,
+                        Modifier.size(64.dp, 86.dp).clip(RoundedCornerShape(8.dp)).background(Background),
+                        contentScale = ContentScale.Crop
+                    )
                     Spacer(Modifier.width(12.dp))
-                    Text(anime.title, color = White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Column(Modifier.weight(1f)) {
+                        Text(anime.title, color = White, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 2)
+                        Spacer(Modifier.height(4.dp))
+                        Text(anime.animeType.ifBlank { "Series" }, color = Gray, fontSize = 11.sp)
+                    }
+                    SmallOutlineButton(
+                        text = if (isSaved) "♥ Saved" else "+ List",
+                        onClick = { onToggleMyList(anime) },
+                        selected = isSaved
+                    )
                 }
             }
+            Spacer(Modifier.height(12.dp))
         }
     }
 }
 
 @Composable
-fun AnimeDetailsScreen(anime: Anime, onBack: () -> Unit) {
+fun AnimeDetailsScreen(
+    anime: Anime,
+    isInMyList: Boolean,
+    onToggleMyList: () -> Unit,
+    onBack: () -> Unit
+) {
     var details by remember(anime.id) { mutableStateOf<AnimeDetails?>(null) }
     var detailsLoading by remember(anime.id) { mutableStateOf(true) }
     var detailsError by remember(anime.id) { mutableStateOf<String?>(null) }
@@ -1017,13 +1387,20 @@ fun AnimeDetailsScreen(anime: Anime, onBack: () -> Unit) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.Top) {
             AsyncImage(anime.posterUrl, anime.title, Modifier.width(108.dp).height(148.dp).clip(RoundedCornerShape(11.dp)).background(SurfaceDark), contentScale = ContentScale.Crop)
             Spacer(Modifier.width(13.dp))
-            Column {
+            Column(Modifier.weight(1f)) {
                 Text(details?.englishTitle?.takeIf { it.isNotBlank() } ?: anime.title, color = White, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold)
                 Text(details?.japaneseTitle.orEmpty(), color = Gray, fontSize = 11.sp)
                 Spacer(Modifier.height(8.dp))
                 Text("⭐ ${details?.rating ?: "Loading..."}", color = AccentRed, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 Text("Year: ${details?.year ?: "Loading..."}", color = Gray, fontSize = 11.sp)
                 Text("Episodes: ${details?.episodes ?: "Loading..."}", color = Gray, fontSize = 11.sp)
+                Spacer(Modifier.height(10.dp))
+                SmallOutlineButton(
+                    text = if (isInMyList) "♥  In My List (Remove)" else "♡  Add to My List",
+                    onClick = onToggleMyList,
+                    modifier = Modifier.fillMaxWidth(),
+                    selected = isInMyList
+                )
             }
         }
         if (detailsLoading) CircularProgressIndicator(Modifier.padding(16.dp).size(24.dp), color = AccentRed)
@@ -1031,7 +1408,7 @@ fun AnimeDetailsScreen(anime: Anime, onBack: () -> Unit) {
             Text("Extra details unavailable. $detailsError", color = Gray, modifier = Modifier.padding(horizontal = 16.dp))
             DetailSection("Story") { Text(anime.description, color = Gray, fontSize = 13.sp) }
         } else details?.let { info ->
-            DetailSection("Story") { Text(info.description.replace(Regex("<[^>]*>"), ""), color = Gray, fontSize = 13.sp) }
+            DetailSection("Story") { Text(info.description.replace(Regex("\\<[^\\>]*\\>"), ""), color = Gray, fontSize = 13.sp) }
             DetailSection("Anime Information") {
                 InfoLine("Release", info.year); InfoLine("Status", info.status); InfoLine("Studio", info.studio)
                 InfoLine("Episodes", info.episodes); InfoLine("Rating", info.rating)
@@ -1419,14 +1796,5 @@ fun InfoLine(label: String, value: String) {
     Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
         Text("$label: ", color = Gray, fontSize = 12.sp)
         Text(value, color = White, fontSize = 12.sp)
-    }
-}
-
-@Composable
-fun SimpleScreen(title: String, subtitle: String) {
-    Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        Text(title, color = White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(9.dp))
-        Text(subtitle, color = Gray, fontSize = 13.sp)
     }
 }
