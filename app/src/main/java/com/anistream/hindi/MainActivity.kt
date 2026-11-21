@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -47,6 +48,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -54,6 +56,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -1029,6 +1032,7 @@ fun AniStreamApp() {
 
                             Spacer(Modifier.width(10.dp))
 
+                            // Top Nav Links: Replaced "Home" button with "↻ Refresh" button
                             Row(
                                 Modifier
                                     .weight(1f)
@@ -1037,7 +1041,7 @@ fun AniStreamApp() {
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 val navItems = listOf(
-                                    "Home" to "Home",
+                                    "Home" to "↻ Refresh",
                                     "Ongoing" to "⚡ Ongoing",
                                     "Series" to "📺 Series",
                                     "Movies" to "🎬 Movies",
@@ -1056,6 +1060,7 @@ fun AniStreamApp() {
                                             .clickable {
                                                 tab = 0
                                                 topNavCategory = key
+                                                if (key == "Home") loadAllAnime()
                                             }
                                             .padding(horizontal = 7.dp, vertical = 4.dp)
                                     )
@@ -1142,7 +1147,7 @@ fun AniStreamApp() {
     }
 }
 
-/* HOME SCREEN WITH COMPACT FULL-VISIBLE PHONE BANNER + NORMAL POSTER CARDS */
+/* HOME SCREEN WITH COMPACT FULL-VISIBLE PHONE BANNER + SINGLE-LINE SEARCH + NORMAL POSTER CARDS */
 @Composable
 fun HomeScreen(
     animeList: List<Anime>,
@@ -1254,7 +1259,7 @@ fun HomeScreen(
                 val isHeroInList = myListIds.contains(hero.id)
                 var dragDelta by remember { mutableFloatStateOf(0f) }
 
-                // 1. COMPACT FULL-VISIBLE PHONE BANNER (215.dp height so the entire banner fits on phone screen)
+                // 1. COMPACT FULL-VISIBLE PHONE BANNER (215.dp height)
                 Box(
                     Modifier
                         .fillMaxWidth()
@@ -1487,48 +1492,64 @@ fun HomeScreen(
                     }
                 }
 
-                // 2. ON-HOME SEARCH BAR + LANGUAGE & GENRE DROPDOWNS + GENRE CHIPS
+                // 2. COMPACT SINGLE-LINE SEARCH BAR + LANGUAGE & GENRE DROPDOWNS + GENRE CHIPS
                 Column(
                     Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 14.dp, vertical = 10.dp)
                 ) {
-                    OutlinedTextField(
-                        value = homeSearchQuery,
-                        onValueChange = { homeSearchQuery = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = {
-                            Text(
-                                "🔍 Search anime, movies, genre or language...",
-                                color = Gray,
-                                fontSize = 12.sp
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(38.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(SurfaceDark)
+                            .border(
+                                1.dp,
+                                if (homeSearchQuery.isNotEmpty()) AccentRed else Color(0xFF252836),
+                                RoundedCornerShape(10.dp)
                             )
-                        },
-                        singleLine = true,
-                        trailingIcon = {
+                            .padding(horizontal = 12.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                Modifier.weight(1f),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                if (homeSearchQuery.isEmpty()) {
+                                    Text(
+                                        text = "🔍 Search anime, movies, genre or language...",
+                                        color = Gray,
+                                        fontSize = 11.5.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                BasicTextField(
+                                    value = homeSearchQuery,
+                                    onValueChange = { homeSearchQuery = it },
+                                    singleLine = true,
+                                    textStyle = TextStyle(color = White, fontSize = 12.sp),
+                                    cursorBrush = SolidColor(AccentRed),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
                             if (homeSearchQuery.isNotEmpty()) {
+                                Spacer(Modifier.width(8.dp))
                                 Text(
                                     "✕",
                                     color = AccentRed,
-                                    fontSize = 14.sp,
+                                    fontSize = 13.sp,
                                     fontWeight = FontWeight.Bold,
-                                    modifier = Modifier
-                                        .clickable { homeSearchQuery = "" }
-                                        .padding(horizontal = 10.dp)
+                                    modifier = Modifier.clickable { homeSearchQuery = "" }
                                 )
                             }
-                        },
-                        shape = RoundedCornerShape(10.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = SurfaceDark,
-                            unfocusedContainerColor = SurfaceDark,
-                            focusedTextColor = White,
-                            unfocusedTextColor = White,
-                            focusedBorderColor = AccentRed,
-                            unfocusedBorderColor = Color(0xFF252836),
-                            cursorColor = AccentRed
-                        )
-                    )
+                        }
+                    }
 
                     Spacer(Modifier.height(8.dp))
 
@@ -1732,7 +1753,7 @@ fun AnimeCatalogRowSection(
     }
 }
 
-/* NORMAL POSTER CARD: Tap poster directly to open Details (No Details or Heart buttons on card) */
+/* NORMAL POSTER CARD: Tap poster directly to open Details */
 @Composable
 fun WebsiteStyleAnimeCard(
     anime: Anime,
