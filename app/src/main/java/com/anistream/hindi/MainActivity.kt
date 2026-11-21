@@ -4,9 +4,12 @@ import android.app.Activity
 import android.app.DownloadManager
 import android.content.Context
 import android.content.pm.ActivityInfo
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
+import android.util.Base64
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.ViewGroup
@@ -16,9 +19,13 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -40,6 +47,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -50,9 +58,11 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -67,6 +77,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Locale
@@ -83,6 +94,17 @@ private val AccentRed = Color(0xFFFF1744)
 private val SeekBlue = Color(0xFF5AB4FF)
 private val White = Color.White
 private val Gray = Color(0xFF999BA5)
+
+private val PRESET_ANIME_AVATARS = listOf(
+    "https://api.dicebear.com/9.x/adventurer/png?seed=Obito&backgroundColor=b6e3f4",
+    "https://api.dicebear.com/9.x/adventurer/png?seed=Gojo&backgroundColor=c0aede",
+    "https://api.dicebear.com/9.x/adventurer/png?seed=Naruto&backgroundColor=ffd5dc",
+    "https://api.dicebear.com/9.x/adventurer/png?seed=Luffy&backgroundColor=ffdfbf",
+    "https://api.dicebear.com/9.x/adventurer/png?seed=Jinwoo&backgroundColor=d1d4f9",
+    "https://api.dicebear.com/9.x/adventurer/png?seed=Tanjiro&backgroundColor=b6e3f4",
+    "https://api.dicebear.com/9.x/adventurer/png?seed=Goku&backgroundColor=ffdfbf",
+    "https://api.dicebear.com/9.x/adventurer/png?seed=Nezuko&backgroundColor=ffd5dc"
+)
 
 private val animeDetailsCache = mutableMapOf<String, AnimeDetails>()
 private val seasonsCache = mutableMapOf<String, List<AnimeSeason>>()
@@ -113,7 +135,8 @@ data class UserSession(
     val email: String,
     val fullName: String,
     val accessToken: String,
-    val createdAt: String
+    val createdAt: String,
+    val avatarUrl: String = ""
 )
 
 class MainActivity : ComponentActivity() {
@@ -168,12 +191,16 @@ private fun request(
 }
 
 private fun saveUserSession(context: Context, session: UserSession) {
-    context.getSharedPreferences(AUTH_PREFS, Context.MODE_PRIVATE).edit()
+    val prefs = context.getSharedPreferences(AUTH_PREFS, Context.MODE_PRIVATE)
+    val finalAvatar = session.avatarUrl.ifBlank { prefs.getString("avatar_backup_${session.userId}", "").orEmpty() }
+    prefs.edit()
         .putString("user_id", session.userId)
         .putString("email", session.email)
         .putString("full_name", session.fullName)
         .putString("access_token", session.accessToken)
         .putString("created_at", session.createdAt)
+        .putString("avatar_url", finalAvatar)
+        .putString("avatar_backup_${session.userId}", finalAvatar)
         .apply()
 }
 
@@ -184,11 +211,97 @@ private fun loadUserSession(context: Context): UserSession? {
     val userId = prefs.getString("user_id", "").orEmpty()
     val fullName = prefs.getString("full_name", "").orEmpty()
     val createdAt = prefs.getString("created_at", "").orEmpty()
-    return UserSession(userId, email, fullName, token, createdAt)
+    val avatarUrl = prefs.getString("avatar_url", "").orEmpty()
+        .ifBlank { prefs.getString("avatar_backup_$userId", "").orEmpty() }
+    return UserSession(userId, email, fullName, token, createdAt, avatarUrl)
 }
 
 private fun clearUserSession(context: Context) {
-    context.getSharedPreferences(AUTH_PREFS, Context.MODE_PRIVATE).edit().clear().apply()
+    val prefs = context.getSharedPreferences(AUTH_PREFS, Context.MODE_PRIVATE)
+    prefs.edit()
+        .remove("user_id")
+        .remove("email")
+        .remove("full_name")
+        .remove("access_token")
+        .remove("created_at")
+        .remove("avatar_url")
+        .apply()
+}
+
+private fun uriToBase64Avatar(context: Context, uri: Uri): String? {
+    return runCatching {
+        val inputStream = context.contentResolver.openInputStream(uri) ?: return null
+        val original = BitmapFactory.decodeStream(inputStream)
+        inputStream.close()
+        if (original == null) return null
+
+        val minSide = minOf(original.width, original.height)
+        val cropX = (original.width - minSide) / 2
+        val cropY = (original.height - minSide) / 2
+        val square = Bitmap.createBitmap(original, cropX, cropY, minSide, minSide)
+        val scaled = Bitmap.createScaledBitmap(square, 180, 180, true)
+
+        val output = ByteArrayOutputStream()
+        scaled.compress(Bitmap.CompressFormat.JPEG, 82, output)
+        val base64 = Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
+        "data:image/jpeg;base64,$base64"
+    }.getOrNull()
+}
+
+private fun decodeBase64ToBitmap(dataUri: String): Bitmap? {
+    return runCatching {
+        val cleanBase64 = dataUri.substringAfter("base64,", "")
+        if (cleanBase64.isBlank()) return null
+        val bytes = Base64.decode(cleanBase64, Base64.DEFAULT)
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+    }.getOrNull()
+}
+
+@Composable
+fun UserAvatarView(
+    avatarUrl: String,
+    fallbackInitial: Char,
+    size: Dp,
+    fontSize: TextUnit,
+    modifier: Modifier = Modifier
+) {
+    val base64Bitmap = remember(avatarUrl) {
+        if (avatarUrl.startsWith("data:image")) decodeBase64ToBitmap(avatarUrl) else null
+    }
+
+    Box(
+        modifier = modifier
+            .size(size)
+            .background(AccentRed),
+        contentAlignment = Alignment.Center
+    ) {
+        when {
+            base64Bitmap != null -> {
+                Image(
+                    bitmap = base64Bitmap.asImageBitmap(),
+                    contentDescription = "Profile Photo",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            }
+            avatarUrl.startsWith("http://") || avatarUrl.startsWith("https://") || avatarUrl.startsWith("content://") -> {
+                AsyncImage(
+                    model = avatarUrl,
+                    contentDescription = "Profile Photo",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            }
+            else -> {
+                Text(
+                    text = fallbackInitial.toString(),
+                    color = White,
+                    fontSize = fontSize,
+                    fontWeight = FontWeight.Black
+                )
+            }
+        }
+    }
 }
 
 private fun myListKey(userId: String?): String =
@@ -245,6 +358,20 @@ private suspend fun supabaseSyncMyListMetadata(session: UserSession, allIds: Set
     }
 }
 
+private suspend fun supabaseUpdateAvatar(session: UserSession, newAvatarUrl: String): UserSession = withContext(Dispatchers.IO) {
+    val body = JSONObject().apply {
+        put("data", JSONObject().put("avatar_url", newAvatarUrl))
+    }
+    val res = request(
+        "$SUPABASE_URL/auth/v1/user",
+        method = "PUT",
+        body = body.toString(),
+        supabase = true,
+        bearerToken = session.accessToken
+    )
+    parseUserSession(JSONObject(res), fallbackToken = session.accessToken, fallbackAvatar = newAvatarUrl)
+}
+
 private suspend fun supabaseAddToMyList(session: UserSession, animeId: String, allIds: Set<String>) = withContext(Dispatchers.IO) {
     runCatching {
         val payload = JSONObject().apply {
@@ -276,7 +403,7 @@ private suspend fun supabaseRemoveFromMyList(session: UserSession, animeId: Stri
     supabaseSyncMyListMetadata(session, allIds)
 }
 
-private fun parseUserSession(root: JSONObject, fallbackToken: String = ""): UserSession {
+private fun parseUserSession(root: JSONObject, fallbackToken: String = "", fallbackAvatar: String = ""): UserSession {
     val token = root.optString("access_token").ifBlank { fallbackToken }
     val userObj = root.optJSONObject("user") ?: root
     val userId = userObj.optString("id")
@@ -286,7 +413,10 @@ private fun parseUserSession(root: JSONObject, fallbackToken: String = ""): User
     val fullName = metadata?.optString("full_name").orEmpty()
         .ifBlank { metadata?.optString("name").orEmpty() }
         .ifBlank { email.substringBefore("@") }
-    return UserSession(userId, email, fullName, token, createdAt)
+    val avatarUrl = metadata?.optString("avatar_url").orEmpty()
+        .takeUnless { it == "null" }.orEmpty()
+        .ifBlank { fallbackAvatar }
+    return UserSession(userId, email, fullName, token, createdAt, avatarUrl)
 }
 
 private suspend fun supabaseSignUp(fullName: String, email: String, password: String): Pair<UserSession?, String> = withContext(Dispatchers.IO) {
@@ -329,7 +459,7 @@ private suspend fun supabaseFetchProfile(session: UserSession): UserSession = wi
         supabase = true,
         bearerToken = session.accessToken
     )
-    parseUserSession(JSONObject(res), fallbackToken = session.accessToken)
+    parseUserSession(JSONObject(res), fallbackToken = session.accessToken, fallbackAvatar = session.avatarUrl)
 }
 
 private suspend fun supabaseLogout(accessToken: String) = withContext(Dispatchers.IO) {
@@ -937,10 +1067,157 @@ fun ProfileScreen(
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var infoMsg by remember { mutableStateOf<String?>(null) }
     var downloadsCount by remember { mutableIntStateOf(0) }
+    var showAvatarDialog by remember { mutableStateOf(false) }
+    var customAvatarUrlInput by remember(session?.avatarUrl) {
+        mutableStateOf(
+            if (session?.avatarUrl?.startsWith("http") == true) session.avatarUrl else ""
+        )
+    }
+
+    fun applyNewAvatar(newAvatarData: String) {
+        val currentSession = session ?: return
+        val localUpdated = currentSession.copy(avatarUrl = newAvatarData)
+        onSessionUpdated(localUpdated)
+        showAvatarDialog = false
+        loading = true
+        errorMsg = null
+        infoMsg = null
+        scope.launch {
+            try {
+                val cloudUpdated = supabaseUpdateAvatar(localUpdated, newAvatarData)
+                onSessionUpdated(cloudUpdated)
+                infoMsg = if (newAvatarData.isBlank()) "Profile photo hata di gayi." else "Profile photo update aur Supabase mein sync ho gayi!"
+            } catch (e: Exception) {
+                infoMsg = "Profile photo device par save ho gayi."
+            } finally {
+                loading = false
+            }
+        }
+    }
+
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            scope.launch {
+                loading = true
+                val base64Avatar = withContext(Dispatchers.IO) { uriToBase64Avatar(context, uri) }
+                loading = false
+                if (!base64Avatar.isNullOrBlank()) {
+                    applyNewAvatar(base64Avatar)
+                } else {
+                    errorMsg = "Photo read nahi ho payi. Dusri photo try karein."
+                }
+            }
+        }
+    }
 
     LaunchedEffect(session) {
         if (session != null) {
             downloadsCount = withContext(Dispatchers.IO) { readDownloads(context).size }
+        }
+    }
+
+    if (showAvatarDialog && session != null) {
+        Dialog(onDismissRequest = { showAvatarDialog = false }) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(SurfaceDark)
+                    .border(1.dp, Color(0xFF2D2F3E), RoundedCornerShape(18.dp))
+                    .padding(18.dp)
+            ) {
+                Text("Change Profile Photo", color = White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                Spacer(Modifier.height(4.dp))
+                Text("Gallery se apni photo chunein ya Anime Avatar select karein:", color = Gray, fontSize = 12.sp)
+
+                Spacer(Modifier.height(14.dp))
+
+                Button(
+                    onClick = { galleryLauncher.launch("image/*") },
+                    modifier = Modifier.fillMaxWidth().height(44.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentRed, contentColor = White)
+                ) {
+                    Text("📷  CHOOSE FROM GALLERY", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
+                }
+
+                Spacer(Modifier.height(14.dp))
+                Text("OR PICK ANIME AVATAR", color = Gray, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                Spacer(Modifier.height(8.dp))
+
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    PRESET_ANIME_AVATARS.forEach { presetUrl ->
+                        val isSelected = session.avatarUrl == presetUrl
+                        Box(
+                            Modifier
+                                .size(56.dp)
+                                .clip(CircleShape)
+                                .background(Background)
+                                .border(
+                                    width = if (isSelected) 2.5.dp else 1.dp,
+                                    color = if (isSelected) AccentRed else Color(0xFF333646),
+                                    shape = CircleShape
+                                )
+                                .clickable { applyNewAvatar(presetUrl) }
+                        ) {
+                            AsyncImage(
+                                model = presetUrl,
+                                contentDescription = "Preset Avatar",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(14.dp))
+                OutlinedTextField(
+                    value = customAvatarUrlInput,
+                    onValueChange = { customAvatarUrlInput = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Or Paste Image URL", color = Gray) },
+                    placeholder = { Text("https://...", color = Gray) },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = White,
+                        unfocusedTextColor = White,
+                        focusedBorderColor = AccentRed,
+                        unfocusedBorderColor = Gray,
+                        cursorColor = AccentRed
+                    )
+                )
+
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    if (customAvatarUrlInput.trim().startsWith("http")) {
+                        SmallOutlineButton(
+                            text = "Save URL",
+                            onClick = { applyNewAvatar(customAvatarUrlInput.trim()) },
+                            modifier = Modifier.weight(1f),
+                            selected = true
+                        )
+                    }
+                    if (session.avatarUrl.isNotBlank()) {
+                        SmallOutlineButton(
+                            text = "🗑 Remove Photo",
+                            onClick = { applyNewAvatar("") },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    SmallOutlineButton(
+                        text = "Close",
+                        onClick = { showAvatarDialog = false },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
         }
     }
 
@@ -1174,43 +1451,74 @@ fun ProfileScreen(
         } else {
             val initial = (session.fullName.firstOrNull() ?: session.email.firstOrNull() ?: 'A').uppercaseChar()
 
-            Row(
+            Column(
                 Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(18.dp))
                     .background(SurfaceDark)
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(16.dp)
             ) {
-                Box(
-                    Modifier
-                        .size(62.dp)
-                        .clip(CircleShape)
-                        .background(AccentRed),
-                    contentAlignment = Alignment.Center
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(initial.toString(), color = White, fontSize = 26.sp, fontWeight = FontWeight.Black)
-                }
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f)) {
-                    Surface(color = Color(0xFF163222), shape = RoundedCornerShape(5.dp)) {
-                        Text(
-                            "VERIFIED MEMBER",
-                            color = Color(0xFF4CAF50),
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    // Clickable Profile Avatar with Camera Badge
+                    Box(
+                        Modifier
+                            .size(68.dp)
+                            .clickable { showAvatarDialog = true }
+                    ) {
+                        UserAvatarView(
+                            avatarUrl = session.avatarUrl,
+                            fallbackInitial = initial,
+                            size = 64.dp,
+                            fontSize = 26.sp,
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .border(2.dp, AccentRed, CircleShape)
                         )
+                        Box(
+                            Modifier
+                                .size(24.dp)
+                                .align(Alignment.BottomEnd)
+                                .clip(CircleShape)
+                                .background(AccentRed)
+                                .border(2.dp, SurfaceDark, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("✎", color = White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
-                    Spacer(Modifier.height(5.dp))
-                    Text(
-                        session.fullName.ifBlank { "AniStream User" },
-                        color = White,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.ExtraBold
-                    )
-                    Text(session.email, color = Gray, fontSize = 12.sp)
+
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Surface(color = Color(0xFF163222), shape = RoundedCornerShape(5.dp)) {
+                            Text(
+                                "VERIFIED MEMBER",
+                                color = Color(0xFF4CAF50),
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            )
+                        }
+                        Spacer(Modifier.height(5.dp))
+                        Text(
+                            session.fullName.ifBlank { "AniStream User" },
+                            color = White,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                        Text(session.email, color = Gray, fontSize = 12.sp)
+                    }
                 }
+
+                Spacer(Modifier.height(12.dp))
+                SmallOutlineButton(
+                    text = if (session.avatarUrl.isBlank()) "📷  Set Profile Photo" else "📷  Change Profile Photo",
+                    onClick = { showAvatarDialog = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    selected = true
+                )
             }
 
             Spacer(Modifier.height(16.dp))
@@ -1349,15 +1657,28 @@ fun HomeScreen(
                 enabled = !loading
             )
             Spacer(Modifier.width(8.dp))
-            Box(
-                Modifier
-                    .size(40.dp)
-                    .clip(RoundedCornerShape(13.dp))
-                    .background(SurfaceDark)
-                    .clickable { onProfileClick() },
-                contentAlignment = Alignment.Center
-            ) {
-                Text(badgeLetter.toString(), color = AccentRed, fontSize = 20.sp, fontWeight = FontWeight.Black)
+            if (!userSession?.avatarUrl.isNullOrBlank()) {
+                UserAvatarView(
+                    avatarUrl = userSession?.avatarUrl.orEmpty(),
+                    fallbackInitial = badgeLetter,
+                    size = 40.dp,
+                    fontSize = 18.sp,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(13.dp))
+                        .border(1.dp, AccentRed, RoundedCornerShape(13.dp))
+                        .clickable { onProfileClick() }
+                )
+            } else {
+                Box(
+                    Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(13.dp))
+                        .background(SurfaceDark)
+                        .clickable { onProfileClick() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(badgeLetter.toString(), color = AccentRed, fontSize = 20.sp, fontWeight = FontWeight.Black)
+                }
             }
         }
 
@@ -1822,7 +2143,6 @@ fun PlayerScreen(
     var quality by remember(episode.id) { mutableStateOf(initialQual) }
     var languageMenu by remember { mutableStateOf(false) }
     var qualityMenu by remember { mutableStateOf(false) }
-    // Open Watch Page first (fullscreen = false), then play video inside Watch Page
     var fullscreen by remember { mutableStateOf(false) }
     var downloadMessage by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
@@ -2294,7 +2614,6 @@ fun WatchPlayer(
                             .background(Color(0x44000000))
                             .padding(horizontal = 12.dp, vertical = 8.dp)
                     ) {
-                        // Top Row: Back arrow + Title + Music note, Quality, HW (MX Player layout)
                         Row(
                             Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
@@ -2365,7 +2684,6 @@ fun WatchPlayer(
 
                         Spacer(Modifier.height(8.dp))
 
-                        // Left Small Pills (1X, Fit, Rotate) - Normal compact size
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically
@@ -2394,7 +2712,6 @@ fun WatchPlayer(
 
                         Spacer(Modifier.weight(1f))
 
-                        // Slim Timeline Row (00:03 --- thin blue bar + small dot --- 00:34)
                         Row(
                             Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
@@ -2428,7 +2745,6 @@ fun WatchPlayer(
 
                         Spacer(Modifier.height(4.dp))
 
-                        // Bottom Control Row: Lock | Prev, Clean Play/Pause, Next | Fit, Fullscreen
                         Row(
                             Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
@@ -2534,7 +2850,6 @@ fun MxSlimSeekBar(
             val centerY = size.height / 2f
             val activeX = size.width * clamped
 
-            // Inactive thin track
             drawLine(
                 color = Color(0x66FFFFFF),
                 start = Offset(0f, centerY),
@@ -2542,7 +2857,6 @@ fun MxSlimSeekBar(
                 strokeWidth = trackHeight,
                 cap = StrokeCap.Round
             )
-            // Active blue thin track
             drawLine(
                 color = SeekBlue,
                 start = Offset(0f, centerY),
@@ -2550,7 +2864,6 @@ fun MxSlimSeekBar(
                 strokeWidth = trackHeight,
                 cap = StrokeCap.Round
             )
-            // Small round MX-style blue thumb
             drawCircle(
                 color = SeekBlue,
                 radius = 5.dp.toPx(),
@@ -2639,7 +2952,6 @@ fun MxLockIcon(locked: Boolean, size: Dp) {
         val w = this.size.width
         val h = this.size.height
         val stroke = 1.6.dp.toPx()
-        // Body
         drawRoundRect(
             color = tint,
             topLeft = Offset(w * 0.18f, h * 0.45f),
@@ -2647,7 +2959,6 @@ fun MxLockIcon(locked: Boolean, size: Dp) {
             cornerRadius = CornerRadius(2.dp.toPx(), 2.dp.toPx()),
             style = Stroke(width = stroke)
         )
-        // Shackle
         drawArc(
             color = tint,
             startAngle = 180f,
