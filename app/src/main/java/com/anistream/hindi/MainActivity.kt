@@ -17,8 +17,11 @@ import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -31,13 +34,22 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -1810,13 +1822,14 @@ fun PlayerScreen(
     var quality by remember(episode.id) { mutableStateOf(initialQual) }
     var languageMenu by remember { mutableStateOf(false) }
     var qualityMenu by remember { mutableStateOf(false) }
-    var fullscreen by remember { mutableStateOf(true) }
+    // Open Watch Page first (fullscreen = false), then play video inside Watch Page
+    var fullscreen by remember { mutableStateOf(false) }
     var downloadMessage by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
 
     BackHandler {
         if (fullscreen) {
-            onBack()
+            fullscreen = false
         } else {
             onBack()
         }
@@ -1871,11 +1884,36 @@ fun PlayerScreen(
             .background(if (fullscreen) Color.Black else Background)
             .then(if (fullscreen) Modifier else Modifier.verticalScroll(rememberScrollState()))
     ) {
+        if (!fullscreen) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(SurfaceDark)
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("‹", color = White, fontSize = 27.sp, modifier = Modifier.clickable { onBack() })
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("ANISTREAM PLAYER", color = AccentRed, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("Episode ${episode.episodeNumber}", color = Gray, fontSize = 10.sp)
+                }
+                SmallOutlineButton("⛶", onClick = { fullscreen = true })
+            }
+            Text(
+                episode.title.ifBlank { "Episode ${episode.episodeNumber}" },
+                color = White,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = 15.dp, vertical = 12.dp)
+            )
+        }
+
         when {
             loading -> Box(
                 Modifier
                     .fillMaxWidth()
-                    .then(if (fullscreen) Modifier.fillMaxSize() else Modifier.height(235.dp))
+                    .then(if (fullscreen) Modifier.fillMaxSize() else Modifier.height(225.dp))
                     .background(Color.Black),
                 contentAlignment = Alignment.Center
             ) {
@@ -1884,19 +1922,14 @@ fun PlayerScreen(
             error != null -> Box(
                 Modifier
                     .fillMaxWidth()
-                    .then(if (fullscreen) Modifier.fillMaxSize() else Modifier.height(235.dp))
+                    .then(if (fullscreen) Modifier.fillMaxSize() else Modifier.height(225.dp))
                     .background(Color.Black),
                 contentAlignment = Alignment.Center
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(error ?: "Video unavailable", color = White, fontSize = 13.sp)
-                    Spacer(Modifier.height(12.dp))
-                    SmallOutlineButton("‹  Go Back", onClick = onBack)
-                }
+                Text(error ?: "Video unavailable", color = White, fontSize = 13.sp)
             }
             selected != null -> WatchPlayer(
                 videoUrl = selected.videoUrl,
-                episodeId = episode.id,
                 episodeTitle = "EP ${episode.episodeNumber} • ${episode.title.ifBlank { "Episode ${episode.episodeNumber}" }}",
                 fullscreen = fullscreen,
                 hasPrevious = episodeIndex > 0,
@@ -1905,30 +1938,23 @@ fun PlayerScreen(
                 availableLanguages = allLanguages,
                 currentQuality = selected.quality,
                 availableQualities = qualities,
-                canDownload = dlUrl.isNotBlank(),
                 onSelectLanguage = { lang ->
                     language = lang
                     val avail = servers.filter { it.language.equals(lang, true) }
                     quality = avail.firstOrNull { it.quality.equals("720p", true) }?.quality ?: avail.firstOrNull()?.quality.orEmpty()
                 },
                 onSelectQuality = { q -> quality = q },
-                onDownloadClick = { triggerDownload() },
                 onPreviousEpisode = { if (episodeIndex > 0) onEpisodeChange(episodeIndex - 1) },
                 onNextEpisode = { if (episodeIndex < episodes.lastIndex) onEpisodeChange(episodeIndex + 1) },
                 onToggleFullscreen = { fullscreen = !fullscreen },
-                onBack = onBack
+                onBack = { if (fullscreen) fullscreen = false else onBack() }
             )
         }
 
         if (!fullscreen && servers.isNotEmpty()) {
             Column(Modifier.padding(14.dp)) {
-                Text(
-                    "Episode ${episode.episodeNumber}: ${episode.title.ifBlank { "Episode ${episode.episodeNumber}" }}",
-                    color = White,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.ExtraBold
-                )
-                Spacer(Modifier.height(12.dp))
+                Text("PLAYBACK SETTINGS", color = Gray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Box(Modifier.weight(1f)) {
                         SmallOutlineButton("Audio: ${language.ifBlank { "Select" }}", onClick = { languageMenu = true }, modifier = Modifier.fillMaxWidth())
@@ -1958,11 +1984,26 @@ fun PlayerScreen(
                     enabled = dlUrl.isNotBlank()
                 )
                 downloadMessage?.let { Text(it, color = AccentRed, fontSize = 11.sp, modifier = Modifier.padding(top = 7.dp)) }
-                Spacer(Modifier.height(14.dp))
+                selected?.let {
+                    Text(
+                        "Server: ${it.serverName}  •  ${it.quality}",
+                        color = Gray,
+                        fontSize = 10.sp,
+                        modifier = Modifier.padding(top = 9.dp)
+                    )
+                }
+            }
+        }
+
+        if (!fullscreen) {
+            Column(Modifier.padding(horizontal = 14.dp)) {
+                Text("EPISODE NAVIGATION", color = Gray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     SmallOutlineButton("← Previous", onClick = { onEpisodeChange(episodeIndex - 1) }, modifier = Modifier.weight(1f), enabled = episodeIndex > 0)
                     SmallOutlineButton("Next Episode →", onClick = { onEpisodeChange(episodeIndex + 1) }, modifier = Modifier.weight(1f), enabled = episodeIndex >= 0 && episodeIndex < episodes.lastIndex, selected = true)
                 }
+                Spacer(Modifier.height(20.dp))
             }
         }
     }
@@ -1971,7 +2012,6 @@ fun PlayerScreen(
 @Composable
 fun WatchPlayer(
     videoUrl: String,
-    episodeId: String,
     episodeTitle: String,
     fullscreen: Boolean,
     hasPrevious: Boolean,
@@ -1980,10 +2020,8 @@ fun WatchPlayer(
     availableLanguages: List<String>,
     currentQuality: String,
     availableQualities: List<String>,
-    canDownload: Boolean,
     onSelectLanguage: (String) -> Unit,
     onSelectQuality: (String) -> Unit,
-    onDownloadClick: () -> Unit,
     onPreviousEpisode: () -> Unit,
     onNextEpisode: () -> Unit,
     onToggleFullscreen: () -> Unit,
@@ -2011,7 +2049,7 @@ fun WatchPlayer(
                 }
             }
         } else {
-            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             window?.let {
                 WindowCompat.setDecorFitsSystemWindows(it, true)
@@ -2032,7 +2070,7 @@ fun WatchPlayer(
         Box(
             Modifier
                 .fillMaxWidth()
-                .then(if (fullscreen) Modifier.fillMaxSize() else Modifier.height(235.dp))
+                .then(if (fullscreen) Modifier.fillMaxSize() else Modifier.height(225.dp))
                 .background(Color.Black)
         ) {
             AndroidView(
@@ -2051,16 +2089,18 @@ fun WatchPlayer(
                 update = { if (it.url != videoUrl) it.loadUrl(videoUrl) },
                 modifier = Modifier.fillMaxSize()
             )
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .background(Color(0x88000000))
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("←", color = White, fontSize = 22.sp, modifier = Modifier.clickable { onBack() }.padding(end = 12.dp))
-                Text(episodeTitle, color = White, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, modifier = Modifier.weight(1f))
-                PlayerIconChip(if (fullscreen) "↙" else "⛶") { onToggleFullscreen() }
+            if (fullscreen) {
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(10.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color(0x88000000))
+                        .clickable { onToggleFullscreen() }
+                        .padding(8.dp)
+                ) {
+                    MxFullscreenIcon(size = 16.dp)
+                }
             }
         }
     } else {
@@ -2109,20 +2149,20 @@ fun WatchPlayer(
                 currentPos = player.currentPosition.coerceAtLeast(0L)
                 val dur = player.duration
                 if (dur > 0L) duration = dur
-                delay(400)
+                delay(350)
             }
         }
 
         LaunchedEffect(controlsVisible, isPlaying, isLocked, showAudioPopup, showQualityPopup) {
             if (controlsVisible && isPlaying && !showAudioPopup && !showQualityPopup) {
-                delay(3500)
+                delay(3200)
                 controlsVisible = false
             }
         }
 
         LaunchedEffect(seekToast) {
             if (seekToast != null) {
-                delay(650)
+                delay(600)
                 seekToast = null
             }
         }
@@ -2134,13 +2174,13 @@ fun WatchPlayer(
             val finalPos = if (dur > 0L) target.coerceAtMost(dur) else target
             player.seekTo(finalPos)
             currentPos = finalPos
-            seekToast = if (deltaMs < 0L) "⏪ 10s" else "10s ⏩"
+            seekToast = if (deltaMs < 0L) "-10s" else "+10s"
         }
 
         Box(
             Modifier
                 .fillMaxWidth()
-                .then(if (fullscreen) Modifier.fillMaxSize() else Modifier.height(235.dp))
+                .then(if (fullscreen) Modifier.fillMaxSize() else Modifier.height(225.dp))
                 .background(Color.Black)
         ) {
             AndroidView(
@@ -2187,7 +2227,7 @@ fun WatchPlayer(
                 update = { view ->
                     view.setPlayer(player)
                     view.useController = false
-                    val scale = if (isZoomed) 1.18f else 1.0f
+                    val scale = if (isZoomed) 1.16f else 1.0f
                     view.scaleX = scale
                     view.scaleY = scale
                 },
@@ -2197,39 +2237,39 @@ fun WatchPlayer(
             if (isBuffering) {
                 CircularProgressIndicator(
                     color = SeekBlue,
-                    modifier = Modifier.align(Alignment.Center).size(38.dp),
-                    strokeWidth = 3.dp
+                    modifier = Modifier.align(Alignment.Center).size(30.dp),
+                    strokeWidth = 2.5.dp
                 )
             }
 
             if (isHolding2x) {
                 Surface(
-                    color = Color(0xCC000000),
-                    shape = RoundedCornerShape(20.dp),
-                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 18.dp)
+                    color = Color(0xAA000000),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 12.dp)
                 ) {
                     Text(
-                        "2X Speed ▶▶",
+                        "2X",
                         color = White,
-                        fontSize = 13.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.ExtraBold,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 7.dp)
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
                     )
                 }
             }
 
             seekToast?.let { text ->
                 Surface(
-                    color = Color(0xBB000000),
-                    shape = RoundedCornerShape(22.dp),
+                    color = Color(0xAA000000),
+                    shape = RoundedCornerShape(16.dp),
                     modifier = Modifier.align(Alignment.Center)
                 ) {
                     Text(
                         text,
                         color = White,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 9.dp)
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
                     )
                 }
             }
@@ -2239,36 +2279,38 @@ fun WatchPlayer(
                     Box(
                         Modifier
                             .align(Alignment.BottomStart)
-                            .padding(20.dp)
+                            .padding(14.dp)
+                            .clip(CircleShape)
+                            .background(Color(0x8814151C))
+                            .clickable { isLocked = false }
+                            .padding(9.dp)
                     ) {
-                        PlayerCirclePill("🔒") { isLocked = false }
+                        MxLockIcon(locked = true, size = 16.dp)
                     }
                 } else {
                     Column(
                         Modifier
                             .fillMaxSize()
-                            .background(Color(0x55000000))
-                            .padding(horizontal = 14.dp, vertical = 10.dp)
+                            .background(Color(0x44000000))
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
                     ) {
-                        // Top Bar (like Screenshot 2: Back arrow, title, Audio, Quality, HW)
+                        // Top Row: Back arrow + Title + Music note, Quality, HW (MX Player layout)
                         Row(
                             Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                "←",
-                                color = White,
-                                fontSize = 24.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier
+                            Box(
+                                Modifier
                                     .clickable { onBack() }
-                                    .padding(end = 12.dp, top = 2.dp, bottom = 2.dp)
-                            )
+                                    .padding(end = 10.dp, top = 4.dp, bottom = 4.dp)
+                            ) {
+                                MxBackArrowIcon(size = 18.dp)
+                            }
                             Text(
                                 episodeTitle,
                                 color = White,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f)
@@ -2276,7 +2318,12 @@ fun WatchPlayer(
                             Spacer(Modifier.width(8.dp))
 
                             Box {
-                                PlayerTopIcon("♪") { showAudioPopup = true }
+                                MxAudioNoteIcon(
+                                    size = 16.dp,
+                                    modifier = Modifier
+                                        .clickable { showAudioPopup = true }
+                                        .padding(4.dp)
+                                )
                                 DropdownMenu(expanded = showAudioPopup, onDismissRequest = { showAudioPopup = false }) {
                                     availableLanguages.forEach { lang ->
                                         DropdownMenuItem(
@@ -2293,7 +2340,12 @@ fun WatchPlayer(
                             Spacer(Modifier.width(12.dp))
 
                             Box {
-                                PlayerTopIcon(currentQuality.ifBlank { "HD" }) { showQualityPopup = true }
+                                MxSubtitleTrackIcon(
+                                    size = 16.dp,
+                                    modifier = Modifier
+                                        .clickable { showQualityPopup = true }
+                                        .padding(4.dp)
+                                )
                                 DropdownMenu(expanded = showQualityPopup, onDismissRequest = { showQualityPopup = false }) {
                                     availableQualities.forEach { q ->
                                         DropdownMenuItem(
@@ -2307,40 +2359,42 @@ fun WatchPlayer(
                                 }
                             }
 
-                            if (canDownload) {
-                                Spacer(Modifier.width(12.dp))
-                                PlayerTopIcon("↓") { onDownloadClick() }
-                            }
-
                             Spacer(Modifier.width(12.dp))
-                            Text("HW", color = White, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
+                            Text("HW", color = White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
 
-                        Spacer(Modifier.height(12.dp))
+                        Spacer(Modifier.height(8.dp))
 
-                        // Left Quick Action Pills (like Screenshot 2: 1X, Crop/Fit, Rotate)
+                        // Left Small Pills (1X, Fit, Rotate) - Normal compact size
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             val speedLabel = if (normalSpeed == 1.0f) "1X" else "${normalSpeed}X"
-                            PlayerCirclePill(speedLabel) {
+                            PlayerSmallCirclePill(speedLabel) {
                                 val speeds = listOf(1.0f, 1.25f, 1.5f, 2.0f)
                                 val nextIdx = (speeds.indexOf(normalSpeed) + 1) % speeds.size
                                 normalSpeed = speeds[nextIdx]
                                 player.setPlaybackSpeed(normalSpeed)
                             }
-                            PlayerCirclePill(if (isZoomed) "ZOOM" else "FIT") {
+                            PlayerSmallCirclePill(if (isZoomed) "ZOOM" else "FIT") {
                                 isZoomed = !isZoomed
                             }
-                            PlayerCirclePill("⟳") {
-                                onToggleFullscreen()
+                            Box(
+                                Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0x7714151C))
+                                    .clickable { onToggleFullscreen() },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                MxRotateScreenIcon(size = 14.dp)
                             }
                         }
 
                         Spacer(Modifier.weight(1f))
 
-                        // Bottom Timeline Row (00:03 --- slider --- 22:55)
+                        // Slim Timeline Row (00:03 --- thin blue bar + small dot --- 00:34)
                         Row(
                             Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
@@ -2348,69 +2402,98 @@ fun WatchPlayer(
                             Text(
                                 formatDuration(currentPos),
                                 color = White,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
                             )
-                            Slider(
-                                value = if (duration > 0L) (currentPos.toFloat() / duration.toFloat()).coerceIn(0f, 1f) else 0f,
-                                onValueChange = { fraction ->
+                            MxSlimSeekBar(
+                                progress = if (duration > 0L) (currentPos.toFloat() / duration.toFloat()).coerceIn(0f, 1f) else 0f,
+                                onSeek = { fraction ->
                                     if (duration > 0L) {
                                         val newPos = (fraction * duration).toLong()
                                         currentPos = newPos
                                         player.seekTo(newPos)
                                     }
                                 },
-                                modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
-                                colors = SliderDefaults.colors(
-                                    thumbColor = SeekBlue,
-                                    activeTrackColor = SeekBlue,
-                                    inactiveTrackColor = Color(0x66FFFFFF)
-                                )
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(horizontal = 10.dp)
                             )
                             Text(
                                 formatDuration(duration),
                                 color = White,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
                             )
                         }
 
-                        // Bottom Control Bar (Lock | Prev, Play/Pause, Next | Fit, Fullscreen)
+                        Spacer(Modifier.height(4.dp))
+
+                        // Bottom Control Row: Lock | Prev, Clean Play/Pause, Next | Fit, Fullscreen
                         Row(
-                            Modifier.fillMaxWidth().padding(bottom = 2.dp),
+                            Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            PlayerBottomIcon("🔓", enabled = true) { isLocked = true }
+                            Box(
+                                Modifier
+                                    .clickable { isLocked = true }
+                                    .padding(6.dp)
+                            ) {
+                                MxLockIcon(locked = false, size = 16.dp)
+                            }
 
                             Row(
-                                horizontalArrangement = Arrangement.spacedBy(34.dp),
+                                horizontalArrangement = Arrangement.spacedBy(28.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                PlayerBottomIcon("⏮", enabled = hasPrevious) { onPreviousEpisode() }
-                                Text(
-                                    if (isPlaying) "⏸" else "▶",
-                                    color = White,
-                                    fontSize = 30.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier
+                                Box(
+                                    Modifier
+                                        .clickable(enabled = hasPrevious) { onPreviousEpisode() }
+                                        .padding(6.dp)
+                                ) {
+                                    MxPrevNextIcon(isNext = false, enabled = hasPrevious, size = 16.dp)
+                                }
+
+                                Box(
+                                    Modifier
                                         .clickable(
                                             interactionSource = remember { MutableInteractionSource() },
                                             indication = null
                                         ) {
                                             if (player.isPlaying) player.pause() else player.play()
                                         }
-                                        .padding(horizontal = 6.dp)
-                                )
-                                PlayerBottomIcon("⏭", enabled = hasNext) { onNextEpisode() }
+                                        .padding(6.dp)
+                                ) {
+                                    MxPlayPauseIcon(isPlaying = isPlaying, size = 22.dp)
+                                }
+
+                                Box(
+                                    Modifier
+                                        .clickable(enabled = hasNext) { onNextEpisode() }
+                                        .padding(6.dp)
+                                ) {
+                                    MxPrevNextIcon(isNext = true, enabled = hasNext, size = 16.dp)
+                                }
                             }
 
                             Row(
-                                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(14.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                PlayerBottomIcon("▭", enabled = true) { isZoomed = !isZoomed }
-                                PlayerBottomIcon(if (fullscreen) "↙" else "⛶", enabled = true) { onToggleFullscreen() }
+                                Box(
+                                    Modifier
+                                        .clickable { isZoomed = !isZoomed }
+                                        .padding(6.dp)
+                                ) {
+                                    MxAspectFitIcon(size = 16.dp)
+                                }
+                                Box(
+                                    Modifier
+                                        .clickable { onToggleFullscreen() }
+                                        .padding(6.dp)
+                                ) {
+                                    MxFullscreenIcon(size = 16.dp)
+                                }
                             }
                         }
                     }
@@ -2421,67 +2504,329 @@ fun WatchPlayer(
 }
 
 @Composable
-fun PlayerCirclePill(label: String, onClick: () -> Unit) {
-    Surface(
-        color = Color(0x8814151C),
-        shape = CircleShape,
-        modifier = Modifier
-            .defaultMinSize(minWidth = 38.dp, minHeight = 38.dp)
-            .clickable { onClick() }
+fun MxSlimSeekBar(
+    progress: Float,
+    onSeek: (Float) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var widthPx by remember { mutableFloatStateOf(1f) }
+    val clamped = progress.coerceIn(0f, 1f)
+
+    Box(
+        modifier = modifier
+            .height(22.dp)
+            .onSizeChanged { widthPx = it.width.toFloat().coerceAtLeast(1f) }
+            .pointerInput(Unit) {
+                detectTapGestures { offset ->
+                    onSeek((offset.x / widthPx).coerceIn(0f, 1f))
+                }
+            }
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures { change, _ ->
+                    change.consume()
+                    onSeek((change.position.x / widthPx).coerceIn(0f, 1f))
+                }
+            },
+        contentAlignment = Alignment.Center
     ) {
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp)
-        ) {
-            Text(label, color = White, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
+        Canvas(Modifier.fillMaxWidth().height(14.dp)) {
+            val trackHeight = 2.5.dp.toPx()
+            val centerY = size.height / 2f
+            val activeX = size.width * clamped
+
+            // Inactive thin track
+            drawLine(
+                color = Color(0x66FFFFFF),
+                start = Offset(0f, centerY),
+                end = Offset(size.width, centerY),
+                strokeWidth = trackHeight,
+                cap = StrokeCap.Round
+            )
+            // Active blue thin track
+            drawLine(
+                color = SeekBlue,
+                start = Offset(0f, centerY),
+                end = Offset(activeX, centerY),
+                strokeWidth = trackHeight,
+                cap = StrokeCap.Round
+            )
+            // Small round MX-style blue thumb
+            drawCircle(
+                color = SeekBlue,
+                radius = 5.dp.toPx(),
+                center = Offset(activeX, centerY)
+            )
         }
     }
 }
 
 @Composable
-fun PlayerTopIcon(label: String, onClick: () -> Unit) {
-    Surface(
-        color = Color(0x6614151C),
-        shape = RoundedCornerShape(7.dp),
-        modifier = Modifier.clickable { onClick() }
-    ) {
-        Text(
-            label,
-            color = White,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.ExtraBold,
-            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
+fun MxPlayPauseIcon(isPlaying: Boolean, size: Dp) {
+    Canvas(Modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        if (isPlaying) {
+            val barWidth = w * 0.24f
+            val gap = w * 0.22f
+            val leftX = (w - (barWidth * 2f + gap)) / 2f
+            drawRoundRect(
+                color = White,
+                topLeft = Offset(leftX, h * 0.12f),
+                size = Size(barWidth, h * 0.76f),
+                cornerRadius = CornerRadius(2.dp.toPx(), 2.dp.toPx())
+            )
+            drawRoundRect(
+                color = White,
+                topLeft = Offset(leftX + barWidth + gap, h * 0.12f),
+                size = Size(barWidth, h * 0.76f),
+                cornerRadius = CornerRadius(2.dp.toPx(), 2.dp.toPx())
+            )
+        } else {
+            val path = Path().apply {
+                moveTo(w * 0.20f, h * 0.10f)
+                lineTo(w * 0.88f, h * 0.50f)
+                lineTo(w * 0.20f, h * 0.90f)
+                close()
+            }
+            drawPath(path = path, color = White)
+        }
+    }
+}
+
+@Composable
+fun MxPrevNextIcon(isNext: Boolean, enabled: Boolean, size: Dp) {
+    val tint = if (enabled) White else Color(0x55FFFFFF)
+    Canvas(Modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val barWidth = w * 0.14f
+        if (isNext) {
+            val path = Path().apply {
+                moveTo(w * 0.12f, h * 0.15f)
+                lineTo(w * 0.72f, h * 0.50f)
+                lineTo(w * 0.12f, h * 0.85f)
+                close()
+            }
+            drawPath(path, color = tint)
+            drawRoundRect(
+                color = tint,
+                topLeft = Offset(w * 0.76f, h * 0.15f),
+                size = Size(barWidth, h * 0.70f),
+                cornerRadius = CornerRadius(1.5.dp.toPx(), 1.5.dp.toPx())
+            )
+        } else {
+            drawRoundRect(
+                color = tint,
+                topLeft = Offset(w * 0.10f, h * 0.15f),
+                size = Size(barWidth, h * 0.70f),
+                cornerRadius = CornerRadius(1.5.dp.toPx(), 1.5.dp.toPx())
+            )
+            val path = Path().apply {
+                moveTo(w * 0.88f, h * 0.15f)
+                lineTo(w * 0.28f, h * 0.50f)
+                lineTo(w * 0.88f, h * 0.85f)
+                close()
+            }
+            drawPath(path, color = tint)
+        }
+    }
+}
+
+@Composable
+fun MxLockIcon(locked: Boolean, size: Dp) {
+    val tint = if (locked) SeekBlue else White
+    Canvas(Modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val stroke = 1.6.dp.toPx()
+        // Body
+        drawRoundRect(
+            color = tint,
+            topLeft = Offset(w * 0.18f, h * 0.45f),
+            size = Size(w * 0.64f, h * 0.46f),
+            cornerRadius = CornerRadius(2.dp.toPx(), 2.dp.toPx()),
+            style = Stroke(width = stroke)
+        )
+        // Shackle
+        drawArc(
+            color = tint,
+            startAngle = 180f,
+            sweepAngle = 180f,
+            useCenter = false,
+            topLeft = Offset(w * 0.28f, h * 0.14f),
+            size = Size(w * 0.44f, h * 0.50f),
+            style = Stroke(width = stroke, cap = StrokeCap.Round)
         )
     }
 }
 
 @Composable
-fun PlayerBottomIcon(symbol: String, enabled: Boolean = true, onClick: () -> Unit) {
-    Text(
-        symbol,
-        color = if (enabled) White else Color(0x55FFFFFF),
-        fontSize = 21.sp,
-        fontWeight = FontWeight.Bold,
-        modifier = Modifier
-            .clickable(enabled = enabled) { onClick() }
-            .padding(6.dp)
-    )
+fun MxAspectFitIcon(size: Dp) {
+    Canvas(Modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val stroke = 1.6.dp.toPx()
+        drawRoundRect(
+            color = White,
+            topLeft = Offset(w * 0.08f, h * 0.16f),
+            size = Size(w * 0.84f, h * 0.68f),
+            cornerRadius = CornerRadius(2.dp.toPx(), 2.dp.toPx()),
+            style = Stroke(width = stroke)
+        )
+        drawLine(
+            color = White,
+            start = Offset(w * 0.28f, h * 0.22f),
+            end = Offset(w * 0.28f, h * 0.78f),
+            strokeWidth = stroke
+        )
+        drawLine(
+            color = White,
+            start = Offset(w * 0.72f, h * 0.22f),
+            end = Offset(w * 0.72f, h * 0.78f),
+            strokeWidth = stroke
+        )
+    }
 }
 
 @Composable
-fun PlayerIconChip(symbol: String, onClick: () -> Unit) {
-    Surface(
-        color = Color(0x8814151C),
-        shape = RoundedCornerShape(8.dp),
-        modifier = Modifier.clickable { onClick() }
-    ) {
-        Text(
-            symbol,
+fun MxFullscreenIcon(size: Dp) {
+    Canvas(Modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val stroke = 1.6.dp.toPx()
+        drawRoundRect(
             color = White,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+            topLeft = Offset(w * 0.10f, h * 0.16f),
+            size = Size(w * 0.80f, h * 0.68f),
+            cornerRadius = CornerRadius(2.dp.toPx(), 2.dp.toPx()),
+            style = Stroke(width = stroke)
         )
+        drawLine(
+            color = White,
+            start = Offset(w * 0.30f, h * 0.34f),
+            end = Offset(w * 0.66f, h * 0.66f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+    }
+}
+
+@Composable
+fun MxBackArrowIcon(size: Dp) {
+    Canvas(Modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val stroke = 1.8.dp.toPx()
+        drawLine(
+            color = White,
+            start = Offset(w * 0.85f, h * 0.50f),
+            end = Offset(w * 0.15f, h * 0.50f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = White,
+            start = Offset(w * 0.48f, h * 0.18f),
+            end = Offset(w * 0.15f, h * 0.50f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = White,
+            start = Offset(w * 0.48f, h * 0.82f),
+            end = Offset(w * 0.15f, h * 0.50f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+    }
+}
+
+@Composable
+fun MxAudioNoteIcon(size: Dp, modifier: Modifier = Modifier) {
+    Canvas(modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val stroke = 1.7.dp.toPx()
+        drawCircle(
+            color = White,
+            radius = w * 0.20f,
+            center = Offset(w * 0.38f, h * 0.74f)
+        )
+        drawLine(
+            color = White,
+            start = Offset(w * 0.54f, h * 0.74f),
+            end = Offset(w * 0.54f, h * 0.16f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = White,
+            start = Offset(w * 0.54f, h * 0.16f),
+            end = Offset(w * 0.82f, h * 0.26f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+    }
+}
+
+@Composable
+fun MxSubtitleTrackIcon(size: Dp, modifier: Modifier = Modifier) {
+    Canvas(modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val stroke = 1.6.dp.toPx()
+        drawRoundRect(
+            color = White,
+            topLeft = Offset(w * 0.08f, h * 0.16f),
+            size = Size(w * 0.84f, h * 0.68f),
+            cornerRadius = CornerRadius(2.dp.toPx(), 2.dp.toPx()),
+            style = Stroke(width = stroke)
+        )
+        drawLine(
+            color = White,
+            start = Offset(w * 0.24f, h * 0.44f),
+            end = Offset(w * 0.76f, h * 0.44f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = White,
+            start = Offset(w * 0.24f, h * 0.64f),
+            end = Offset(w * 0.58f, h * 0.64f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+    }
+}
+
+@Composable
+fun MxRotateScreenIcon(size: Dp) {
+    Canvas(Modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val stroke = 1.4.dp.toPx()
+        drawRoundRect(
+            color = White,
+            topLeft = Offset(w * 0.22f, h * 0.15f),
+            size = Size(w * 0.56f, h * 0.70f),
+            cornerRadius = CornerRadius(2.dp.toPx(), 2.dp.toPx()),
+            style = Stroke(width = stroke)
+        )
+    }
+}
+
+@Composable
+fun PlayerSmallCirclePill(label: String, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .defaultMinSize(minWidth = 28.dp, minHeight = 28.dp)
+            .clip(CircleShape)
+            .background(Color(0x7714151C))
+            .clickable { onClick() }
+            .padding(horizontal = 8.dp, vertical = 5.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(label, color = White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -2542,7 +2887,7 @@ fun DownloadsScreen(onPlay: (DownloadInfo) -> Unit) {
                 Spacer(Modifier.height(8.dp))
                 Text("Abhi koi download nahi hai", color = White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(4.dp))
-                Text("Kisi bhi episode ke player mein top bar par '↓' dabayein.", color = Gray, fontSize = 12.sp)
+                Text("Kisi bhi episode ke Watch Page par 'Download Episode' dabayein.", color = Gray, fontSize = 12.sp)
             }
         }
 
@@ -2656,29 +3001,54 @@ fun DownloadsScreen(onPlay: (DownloadInfo) -> Unit) {
 
 @Composable
 fun LocalDownloadedPlayer(download: DownloadInfo, onBack: () -> Unit) {
-    var fullscreen by remember { mutableStateOf(true) }
-    BackHandler { onBack() }
+    var fullscreen by remember { mutableStateOf(false) }
+    BackHandler {
+        if (fullscreen) fullscreen = false else onBack()
+    }
 
-    WatchPlayer(
-        videoUrl = download.localUri,
-        episodeId = "offline_${download.id}",
-        episodeTitle = download.title,
-        fullscreen = fullscreen,
-        hasPrevious = false,
-        hasNext = false,
-        currentLanguage = "Offline",
-        availableLanguages = listOf("Offline"),
-        currentQuality = "Local",
-        availableQualities = listOf("Local"),
-        canDownload = false,
-        onSelectLanguage = {},
-        onSelectQuality = {},
-        onDownloadClick = {},
-        onPreviousEpisode = {},
-        onNextEpisode = {},
-        onToggleFullscreen = { fullscreen = !fullscreen },
-        onBack = onBack
-    )
+    Column(Modifier.fillMaxSize().background(Color.Black)) {
+        if (!fullscreen) {
+            Row(
+                Modifier.fillMaxWidth().background(SurfaceDark).padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("‹", color = White, fontSize = 27.sp, modifier = Modifier.clickable { onBack() })
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("OFFLINE PLAYER", color = AccentRed, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text(download.title, color = White, fontSize = 11.sp, maxLines = 1)
+                }
+                SmallOutlineButton("⛶", onClick = { fullscreen = true })
+            }
+        }
+        Box(Modifier.fillMaxWidth().weight(1f).background(Color.Black)) {
+            WatchPlayer(
+                videoUrl = download.localUri,
+                episodeTitle = download.title,
+                fullscreen = fullscreen,
+                hasPrevious = false,
+                hasNext = false,
+                currentLanguage = "Offline",
+                availableLanguages = listOf("Offline"),
+                currentQuality = "Local",
+                availableQualities = listOf("Local"),
+                onSelectLanguage = {},
+                onSelectQuality = {},
+                onPreviousEpisode = {},
+                onNextEpisode = {},
+                onToggleFullscreen = { fullscreen = !fullscreen },
+                onBack = { if (fullscreen) fullscreen = false else onBack() }
+            )
+        }
+        if (!fullscreen) {
+            Text(
+                "✓  Saved on your device • Offline playback",
+                color = Color(0xFF4CAF50),
+                fontSize = 11.sp,
+                modifier = Modifier.padding(14.dp)
+            )
+        }
+    }
 }
 
 @Composable
