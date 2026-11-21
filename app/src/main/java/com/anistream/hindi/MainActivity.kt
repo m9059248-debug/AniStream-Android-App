@@ -1000,7 +1000,6 @@ fun AniStreamApp() {
                         onBack = { selectedAnime = null }
                     )
                     else -> {
-                        // Website-Style Top Header Bar ([HD] AniStream | Nav Links | User Pill)
                         Row(
                             Modifier
                                 .fillMaxWidth()
@@ -1008,7 +1007,6 @@ fun AniStreamApp() {
                                 .padding(horizontal = 12.dp, vertical = 9.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Red "HD" pill badge + AniStream
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.clickable {
@@ -1031,7 +1029,6 @@ fun AniStreamApp() {
 
                             Spacer(Modifier.width(10.dp))
 
-                            // Scrollable Top Nav Links: Home | ⚡ Ongoing | 📺 Series | 🎬 Movies | 📚 All Anime
                             Row(
                                 Modifier
                                     .weight(1f)
@@ -1067,7 +1064,6 @@ fun AniStreamApp() {
 
                             Spacer(Modifier.width(8.dp))
 
-                            // Right Profile Pill (Avatar Circle + Name inside Dark Red-Bordered Pill)
                             Row(
                                 Modifier
                                     .clip(RoundedCornerShape(20.dp))
@@ -1146,7 +1142,7 @@ fun AniStreamApp() {
     }
 }
 
-/* HOME SCREEN MATCHING 83614.jpg DESIGN (BIG SLIDING BANNER + SEARCH & FILTERS + CARDS) */
+/* HOME SCREEN WITH COMPACT FULL-VISIBLE PHONE BANNER + NORMAL POSTER CARDS */
 @Composable
 fun HomeScreen(
     animeList: List<Anime>,
@@ -1180,7 +1176,6 @@ fun HomeScreen(
         gSet.toList()
     }
 
-    // Filter anime based on Home Search Bar + Language Dropdown + Genre Chips + Top Nav
     val filteredAnime = remember(animeList, homeSearchQuery, selectedLanguage, selectedGenre, topNavCategory) {
         animeList.filter { anime ->
             val matchesQuery = homeSearchQuery.isBlank() ||
@@ -1221,7 +1216,6 @@ fun HomeScreen(
         filteredAnime.filter { it.animeType.equals("Movie", true) }
     }
 
-    // Auto-sliding Big Hero Banner (Top 7 Anime)
     val heroSlides = remember(animeList) { animeList.take(7) }
     var currentSlide by remember(heroSlides.size) { mutableIntStateOf(0) }
 
@@ -1234,7 +1228,7 @@ fun HomeScreen(
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         when {
-            loading -> Box(Modifier.fillMaxWidth().height(340.dp), contentAlignment = Alignment.Center) {
+            loading -> Box(Modifier.fillMaxWidth().height(215.dp), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = AccentRed)
             }
             error != null -> Column(
@@ -1251,7 +1245,7 @@ fun HomeScreen(
                 Spacer(Modifier.height(10.dp))
                 SmallOutlineButton(text = "↻ Try Again", onClick = onRefresh, selected = true)
             }
-            heroSlides.isEmpty() -> Box(Modifier.fillMaxWidth().height(220.dp), contentAlignment = Alignment.Center) {
+            heroSlides.isEmpty() -> Box(Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
                 Text("No published anime found yet.", color = Gray, fontSize = 13.sp)
             }
             else -> {
@@ -1260,11 +1254,11 @@ fun HomeScreen(
                 val isHeroInList = myListIds.contains(hero.id)
                 var dragDelta by remember { mutableFloatStateOf(0f) }
 
-                // 1. BIG FULL-WIDTH SLIDING HERO BANNER (Matching 83614.jpg)
+                // 1. COMPACT FULL-VISIBLE PHONE BANNER (215.dp height so the entire banner fits on phone screen)
                 Box(
                     Modifier
                         .fillMaxWidth()
-                        .height(335.dp)
+                        .height(215.dp)
                         .background(SurfaceDark)
                         .pointerInput(heroSlides.size, safeIndex) {
                             detectHorizontalDragGestures(
@@ -1291,16 +1285,15 @@ fun HomeScreen(
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop
                     )
-                    // Left-to-right and top-to-bottom dark cinematic gradient overlay
                     Box(
                         Modifier
                             .fillMaxSize()
                             .background(
                                 Brush.horizontalGradient(
                                     colors = listOf(
-                                        Color(0xF208090D),
-                                        Color(0xCC08090D),
-                                        Color(0x6608090D)
+                                        Color(0xEE08090D),
+                                        Color(0xBB08090D),
+                                        Color(0x4408090D)
                                     )
                                 )
                             )
@@ -1311,8 +1304,8 @@ fun HomeScreen(
                             .background(
                                 Brush.verticalGradient(
                                     colors = listOf(
-                                        Color(0x3308090D),
-                                        Color(0x8808090D),
+                                        Color(0x2208090D),
+                                        Color(0x7708090D),
                                         Color(0xFF08090D)
                                     )
                                 )
@@ -1323,66 +1316,61 @@ fun HomeScreen(
                         Modifier
                             .align(Alignment.BottomStart)
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 14.dp)
+                            .padding(horizontal = 14.dp, vertical = 10.dp)
                     ) {
-                        // "• ANISTREAM IN HINDI" Badge
                         Box(
                             Modifier
-                                .clip(RoundedCornerShape(12.dp))
+                                .clip(RoundedCornerShape(10.dp))
                                 .background(Color(0xFF2D1018))
-                                .border(1.dp, Color(0xFF5A1A29), RoundedCornerShape(12.dp))
-                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                                .border(1.dp, Color(0xFF5A1A29), RoundedCornerShape(10.dp))
+                                .padding(horizontal = 8.dp, vertical = 2.5.dp)
                         ) {
                             Text(
                                 "• ANISTREAM IN HINDI",
                                 color = AccentRed,
-                                fontSize = 9.sp,
+                                fontSize = 8.sp,
                                 fontWeight = FontWeight.ExtraBold,
-                                letterSpacing = 0.8.sp
+                                letterSpacing = 0.7.sp
                             )
                         }
 
-                        Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(4.dp))
 
-                        // Big Bold Title
                         Text(
                             text = hero.title,
                             color = White,
-                            fontSize = 23.sp,
-                            lineHeight = 27.sp,
+                            fontSize = 18.sp,
+                            lineHeight = 21.sp,
                             fontWeight = FontWeight.Black,
-                            maxLines = 2,
+                            maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
 
-                        // Red Bold Headline ("Watch in Hindi / all")
                         Text(
                             text = "Watch in ${hero.language.ifBlank { "Hindi" }}",
                             color = AccentRed,
-                            fontSize = 18.sp,
+                            fontSize = 13.5.sp,
                             fontWeight = FontWeight.ExtraBold
                         )
 
-                        Spacer(Modifier.height(6.dp))
+                        Spacer(Modifier.height(3.dp))
 
-                        // Story Synopsis
                         Text(
                             text = hero.description
                                 .ifBlank { "Stream full episodes in Hindi dub and official subtitles on AniStream." }
                                 .replace(Regex("\\<[^\\>]*\\>"), ""),
                             color = Color(0xFFC8CAD4),
-                            fontSize = 11.5.sp,
-                            lineHeight = 15.sp,
-                            maxLines = 3,
+                            fontSize = 10.5.sp,
+                            lineHeight = 13.5.sp,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
 
-                        Spacer(Modifier.height(9.dp))
+                        Spacer(Modifier.height(6.dp))
 
-                        // Metadata Pills Row: [Winter 2024] [Action, Comedy, Fantasy] [Hindi]
                         Row(
                             Modifier.horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
                             val metaTags = buildList {
                                 add(hero.season.ifBlank { "TV Series" })
@@ -1392,46 +1380,44 @@ fun HomeScreen(
                             metaTags.forEach { tag ->
                                 Box(
                                     Modifier
-                                        .clip(RoundedCornerShape(6.dp))
+                                        .clip(RoundedCornerShape(5.dp))
                                         .background(Color(0xFF191C26))
-                                        .border(1.dp, Color(0xFF2C3040), RoundedCornerShape(6.dp))
-                                        .padding(horizontal = 9.dp, vertical = 4.dp)
+                                        .border(1.dp, Color(0xFF2C3040), RoundedCornerShape(5.dp))
+                                        .padding(horizontal = 7.dp, vertical = 2.5.dp)
                                 ) {
-                                    Text(tag, color = Color(0xFFE0E2EC), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                                    Text(tag, color = Color(0xFFE0E2EC), fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
                                 }
                             }
                         }
 
-                        Spacer(Modifier.height(12.dp))
+                        Spacer(Modifier.height(8.dp))
 
-                        // Bottom Row: Medium Action Buttons on Left + Slide Arrows & Dots on Right
                         Row(
                             Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            // Medium-Sized Buttons ("na mota na patla na chota na bada")
-                            Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Box(
                                     Modifier
-                                        .height(36.dp)
+                                        .height(32.dp)
                                         .clip(RoundedCornerShape(8.dp))
                                         .background(AccentRed)
                                         .clickable { onAnimeClick(hero) }
-                                        .padding(horizontal = 14.dp),
+                                        .padding(horizontal = 12.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
                                         "▶  Details",
                                         color = White,
-                                        fontSize = 12.sp,
+                                        fontSize = 11.sp,
                                         fontWeight = FontWeight.ExtraBold
                                     )
                                 }
 
                                 Box(
                                     Modifier
-                                        .height(36.dp)
+                                        .height(32.dp)
                                         .clip(RoundedCornerShape(8.dp))
                                         .background(if (isHeroInList) AccentRed else Color(0xFF1C1F2B))
                                         .border(
@@ -1440,27 +1426,26 @@ fun HomeScreen(
                                             RoundedCornerShape(8.dp)
                                         )
                                         .clickable { onToggleMyList(hero) }
-                                        .padding(horizontal = 13.dp),
+                                        .padding(horizontal = 11.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
                                         if (isHeroInList) "♥  In My List" else "+  My List",
                                         color = White,
-                                        fontSize = 11.5.sp,
+                                        fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold
                                     )
                                 }
                             }
 
-                            // Slider Controls: < > Arrows + Pagination Dots
                             if (heroSlides.size > 1) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
                                     Box(
                                         Modifier
-                                            .size(26.dp)
+                                            .size(24.dp)
                                             .clip(CircleShape)
                                             .background(Color(0xFF191C26))
                                             .border(1.dp, Color(0xFF2F3242), CircleShape)
@@ -1469,11 +1454,11 @@ fun HomeScreen(
                                             },
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Text("‹", color = White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                        Text("‹", color = White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                                     }
                                     Box(
                                         Modifier
-                                            .size(26.dp)
+                                            .size(24.dp)
                                             .clip(CircleShape)
                                             .background(Color(0xFF191C26))
                                             .border(1.dp, Color(0xFF2F3242), CircleShape)
@@ -1482,15 +1467,15 @@ fun HomeScreen(
                                             },
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Text("›", color = White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                        Text("›", color = White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                                     }
                                     Spacer(Modifier.width(2.dp))
                                     heroSlides.indices.forEach { idx ->
                                         val active = idx == safeIndex
                                         Box(
                                             Modifier
-                                                .height(5.dp)
-                                                .width(if (active) 14.dp else 5.dp)
+                                                .height(4.5.dp)
+                                                .width(if (active) 12.dp else 4.5.dp)
                                                 .clip(CircleShape)
                                                 .background(if (active) AccentRed else Color(0xFF3B3E4F))
                                                 .clickable { currentSlide = idx }
@@ -1502,13 +1487,12 @@ fun HomeScreen(
                     }
                 }
 
-                // 2. ON-HOME SEARCH BAR + LANGUAGE & GENRE DROPDOWNS + GENRE CHIPS (Matching 83614.jpg)
+                // 2. ON-HOME SEARCH BAR + LANGUAGE & GENRE DROPDOWNS + GENRE CHIPS
                 Column(
                     Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 14.dp, vertical = 10.dp)
                 ) {
-                    // Search Input Box
                     OutlinedTextField(
                         value = homeSearchQuery,
                         onValueChange = { homeSearchQuery = it },
@@ -1548,7 +1532,6 @@ fun HomeScreen(
 
                     Spacer(Modifier.height(8.dp))
 
-                    // Dropdown Filters Row: [All Languages ▾]  [All Genres ▾]
                     Row(
                         Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1602,7 +1585,6 @@ fun HomeScreen(
 
                     Spacer(Modifier.height(10.dp))
 
-                    // Horizontal Scrollable Genre Chips Row: (All) (Action) (Adventure) (Anime Movie) (Comedy)...
                     Row(
                         Modifier
                             .fillMaxWidth()
@@ -1638,7 +1620,7 @@ fun HomeScreen(
 
                 Spacer(Modifier.height(6.dp))
 
-                // 3. ANIME SECTIONS MATCHING 83614.jpg
+                // 3. ANIME SECTIONS
                 if (filteredAnime.isEmpty()) {
                     Box(
                         Modifier
@@ -1670,16 +1652,12 @@ fun HomeScreen(
                             title = "⚡ Ongoing Series",
                             subtitle = "Currently running weekly episodes",
                             animeList = ongoingSeries,
-                            myListIds = myListIds,
-                            onToggleMyList = onToggleMyList,
                             onAnimeClick = onAnimeClick
                         )
                         AnimeCatalogRowSection(
                             title = "📺 Anime Series",
                             subtitle = "Complete seasons and episodic series",
                             animeList = animeSeries,
-                            myListIds = myListIds,
-                            onToggleMyList = onToggleMyList,
                             onAnimeClick = onAnimeClick
                         )
                         if (animeMovies.isNotEmpty()) {
@@ -1687,8 +1665,6 @@ fun HomeScreen(
                                 title = "🎬 Anime Movies",
                                 subtitle = "Standalone movies & theatrical releases",
                                 animeList = animeMovies,
-                                myListIds = myListIds,
-                                onToggleMyList = onToggleMyList,
                                 onAnimeClick = onAnimeClick
                             )
                         }
@@ -1696,8 +1672,6 @@ fun HomeScreen(
                             title = "📚 All Anime Catalog",
                             subtitle = "Search and filter through the complete library (${filteredAnime.size})",
                             animeList = filteredAnime,
-                            myListIds = myListIds,
-                            onToggleMyList = onToggleMyList,
                             onAnimeClick = onAnimeClick
                         )
                     } else {
@@ -1705,8 +1679,6 @@ fun HomeScreen(
                             title = "📚 $topNavCategory Catalog (${filteredAnime.size})",
                             subtitle = "Showing filtered results",
                             animeList = filteredAnime,
-                            myListIds = myListIds,
-                            onToggleMyList = onToggleMyList,
                             onAnimeClick = onAnimeClick
                         )
                     }
@@ -1726,8 +1698,6 @@ fun AnimeCatalogRowSection(
     title: String,
     subtitle: String,
     animeList: List<Anime>,
-    myListIds: Set<String>,
-    onToggleMyList: (Anime) -> Unit,
     onAnimeClick: (Anime) -> Unit
 ) {
     if (animeList.isEmpty()) return
@@ -1755,8 +1725,6 @@ fun AnimeCatalogRowSection(
             animeList.forEach { anime ->
                 WebsiteStyleAnimeCard(
                     anime = anime,
-                    isInMyList = myListIds.contains(anime.id),
-                    onToggleMyList = { onToggleMyList(anime) },
                     onClick = { onAnimeClick(anime) }
                 )
             }
@@ -1764,12 +1732,10 @@ fun AnimeCatalogRowSection(
     }
 }
 
-/* CARD MATCHING 83614.jpg: Status Badge + Poster + Title + Season/Lang + [▶ Details] & [♥] Buttons */
+/* NORMAL POSTER CARD: Tap poster directly to open Details (No Details or Heart buttons on card) */
 @Composable
 fun WebsiteStyleAnimeCard(
     anime: Anime,
-    isInMyList: Boolean,
-    onToggleMyList: () -> Unit,
     onClick: () -> Unit
 ) {
     val isMovie = anime.animeType.equals("Movie", true)
@@ -1787,13 +1753,12 @@ fun WebsiteStyleAnimeCard(
 
     Column(
         Modifier
-            .width(142.dp)
+            .width(136.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(CardDark)
             .border(1.dp, Color(0xFF222534), RoundedCornerShape(12.dp))
             .clickable { onClick() }
     ) {
-        // Poster with Top-Left Status Badge
         Box(
             Modifier
                 .fillMaxWidth()
@@ -1823,8 +1788,7 @@ fun WebsiteStyleAnimeCard(
             }
         }
 
-        // Card Info & Medium Buttons Row
-        Column(Modifier.padding(9.dp)) {
+        Column(Modifier.padding(horizontal = 9.dp, vertical = 8.dp)) {
             Text(
                 text = anime.title,
                 color = White,
@@ -1841,58 +1805,11 @@ fun WebsiteStyleAnimeCard(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(Modifier.height(8.dp))
-
-            // Bottom Row inside Card: [▶ Details / ▶ Watch] + [♥]
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    Modifier
-                        .weight(1f)
-                        .height(32.dp)
-                        .clip(RoundedCornerShape(7.dp))
-                        .background(Color(0xFF2B131C))
-                        .border(1.dp, AccentRed, RoundedCornerShape(7.dp))
-                        .clickable { onClick() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = if (isMovie) "▶ Watch" else "▶ Details",
-                        color = AccentRed,
-                        fontSize = 10.5.sp,
-                        fontWeight = FontWeight.ExtraBold
-                    )
-                }
-
-                Box(
-                    Modifier
-                        .size(32.dp)
-                        .clip(RoundedCornerShape(7.dp))
-                        .background(if (isInMyList) AccentRed else Color(0xFF1F2230))
-                        .border(
-                            1.dp,
-                            if (isInMyList) AccentRed else Color(0xFF34384B),
-                            RoundedCornerShape(7.dp)
-                        )
-                        .clickable { onToggleMyList() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = if (isInMyList) "♥" else "♡",
-                        color = White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
         }
     }
 }
 
-/* REUSABLE COMMENTS & ADMIN REPLY SECTION (MEDIUM BALANCED BUTTONS) */
+/* REUSABLE COMMENTS & ADMIN REPLY SECTION */
 @Composable
 fun CommentsSection(
     animeId: String,
@@ -1973,7 +1890,6 @@ fun CommentsSection(
                         onClick = { loadComments() },
                         enabled = !loading && !posting
                     )
-                    // Medium Balanced Post Comment Button
                     Box(
                         modifier = Modifier
                             .height(36.dp)
@@ -3185,7 +3101,6 @@ fun AnimeDetailsScreen(
                 SmallOutlineButton(text = "↻ Retry Seasons", onClick = { loadSeasons(force = true) })
             } else if (seasons.isEmpty()) Text("Abhi is Anime ke Seasons add nahi kiye gaye hain.", color = Gray, fontSize = 11.5.sp)
             else {
-                // Balanced Medium-Sized Season Buttons
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -3249,7 +3164,6 @@ fun AnimeDetailsScreen(
     }
 }
 
-/* BALANCED MEDIUM EPISODE CARD */
 @Composable
 fun EpisodeCard(episode: AnimeEpisode, selected: Boolean = false, onClick: () -> Unit) {
     Column(
@@ -4540,7 +4454,7 @@ fun LocalDownloadedPlayer(download: DownloadInfo, onBack: () -> Unit) {
     }
 }
 
-/* BALANCED MEDIUM BUTTON (36.dp height — Not thin, not oversized) */
+/* BALANCED MEDIUM BUTTON */
 @Composable
 fun SmallOutlineButton(
     text: String,
