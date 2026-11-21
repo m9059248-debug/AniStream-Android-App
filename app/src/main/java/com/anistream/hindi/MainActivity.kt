@@ -1,3 +1,4 @@
+
 package com.anistream.hindi
 
 import android.app.Activity
@@ -18,6 +19,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -28,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -37,8 +40,10 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
@@ -671,32 +676,46 @@ fun PlayerScreen(episode: AnimeEpisode, episodes: List<AnimeEpisode>, episodeInd
 fun WatchPlayer(videoUrl: String, episodeId: String, fullscreen: Boolean, onExitFullscreen: () -> Unit) {
     val context = LocalContext.current
     val activity = context as? Activity
+
     val isWebPage = remember(videoUrl) {
         val lower = videoUrl.lowercase()
-        !(lower.contains(".mp4") || lower.contains(".m3u8") || lower.contains(".mpd") || lower.contains(".mkv") || lower.contains(".webm"))
+        !(lower.contains(".mp4") || lower.contains(".m3u8") ||
+          lower.contains(".mpd") || lower.contains(".mkv") ||
+          lower.contains(".webm"))
     }
+
     DisposableEffect(activity, fullscreen) {
         val window = activity?.window
         val oldOrientation = activity?.requestedOrientation
+
         if (fullscreen) {
             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             window?.let {
                 WindowCompat.setDecorFitsSystemWindows(it, false)
                 WindowInsetsControllerCompat(it, it.decorView).apply {
-                    systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                    systemBarsBehavior =
+                        WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
                     hide(WindowInsetsCompat.Type.systemBars())
                 }
             }
         } else {
             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            window?.let { WindowCompat.setDecorFitsSystemWindows(it, true); WindowInsetsControllerCompat(it, it.decorView).show(WindowInsetsCompat.Type.systemBars()) }
+            window?.let {
+                WindowCompat.setDecorFitsSystemWindows(it, true)
+                WindowInsetsControllerCompat(it, it.decorView).show(WindowInsetsCompat.Type.systemBars())
+            }
         }
+
         onDispose {
-            activity?.requestedOrientation = oldOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            activity?.requestedOrientation =
+                oldOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            window?.let { WindowCompat.setDecorFitsSystemWindows(it, true); WindowInsetsControllerCompat(it, it.decorView).show(WindowInsetsCompat.Type.systemBars()) }
+            window?.let {
+                WindowCompat.setDecorFitsSystemWindows(it, true)
+                WindowInsetsControllerCompat(it, it.decorView).show(WindowInsetsCompat.Type.systemBars())
+            }
         }
     }
 
@@ -704,36 +723,104 @@ fun WatchPlayer(videoUrl: String, episodeId: String, fullscreen: Boolean, onExit
         AndroidView(
             factory = { ctx ->
                 WebView(ctx).apply {
-                    layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
                     settings.mediaPlaybackRequiresUserGesture = false
+                    settings.loadsImagesAutomatically = true
                     webChromeClient = WebChromeClient()
                     webViewClient = WebViewClient()
                     loadUrl(videoUrl)
                 }
             },
             update = { if (it.url != videoUrl) it.loadUrl(videoUrl) },
-            modifier = Modifier.fillMaxWidth().height(if (fullscreen) 300.dp else 230.dp).background(Color.Black)
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(if (fullscreen) 300.dp else 230.dp)
+                .background(Color.Black)
         )
     } else {
-        val exoPlayer = remember(context, episodeId) { ExoPlayer.Builder(context).build() }
-        DisposableEffect(exoPlayer) { onDispose { exoPlayer.release() } }
+        val loadControl = remember {
+            DefaultLoadControl.Builder()
+                .setBufferDurationsMs(
+                    15000,
+                    50000,
+                    1000,
+                    2000
+                )
+                .build()
+        }
+
+        val exoPlayer = remember(context, episodeId) {
+            ExoPlayer.Builder(context)
+                .setLoadControl(loadControl)
+                .build()
+        }
+
+        DisposableEffect(exoPlayer) {
+            onDispose { exoPlayer.release() }
+        }
+
         LaunchedEffect(exoPlayer, videoUrl) {
+            exoPlayer.stop()
+            exoPlayer.clearMediaItems()
             exoPlayer.setMediaItem(MediaItem.fromUri(videoUrl))
             exoPlayer.prepare()
             exoPlayer.playWhenReady = true
             exoPlayer.playbackParameters = PlaybackParameters(1f)
         }
-        AndroidView(factory = { ctx -> PlayerView(ctx).apply {
-            useController = true
-            setPlayer(exoPlayer)
-            setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
-        } }, update = { it.setPlayer(exoPlayer) },
-            modifier = Modifier.fillMaxWidth().then(if (fullscreen) Modifier.fillMaxHeight() else Modifier.height(230.dp)).background(Color.Black))
+
+        AndroidView(
+            factory = { ctx ->
+                PlayerView(ctx).apply {
+                    useController = false
+                    setPlayer(exoPlayer)
+                    setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+                }
+            },
+            update = {
+                it.useController = false
+                it.setPlayer(exoPlayer)
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (fullscreen) Modifier.fillMaxHeight()
+                    else Modifier.height(230.dp)
+                )
+                .background(Color.Black)
+                .pointerInput(exoPlayer) {
+                    detectTapGestures(
+                        onDoubleTap = { offset ->
+                            val current = exoPlayer.currentPosition
+                            val duration = exoPlayer.duration
+
+                            if (offset.x < size.width / 2f) {
+                                exoPlayer.seekTo((current - 10000L).coerceAtLeast(0L))
+                            } else {
+                                val target = current + 10000L
+                                val safeTarget =
+                                    if (duration != C.TIME_UNSET && duration > 0L) {
+                                        target.coerceAtMost(duration)
+                                    } else {
+                                        target
+                                    }
+                                exoPlayer.seekTo(safeTarget)
+                            }
+                        }
+                    )
+                }
+        )
     }
+
     if (fullscreen) {
-        Box(Modifier.fillMaxWidth().padding(6.dp), contentAlignment = Alignment.TopEnd) {
+        Box(
+            Modifier.fillMaxWidth().padding(6.dp),
+            contentAlignment = Alignment.TopEnd
+        ) {
             SmallOutlineButton("✕", onExitFullscreen)
         }
     }
