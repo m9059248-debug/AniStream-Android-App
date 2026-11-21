@@ -20,6 +20,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -31,6 +32,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -43,6 +46,7 @@ import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -51,6 +55,7 @@ import java.net.URL
 
 private const val SUPABASE_URL = "https://cyftkgouolxcverswvpv.supabase.co"
 private const val SUPABASE_KEY = "sb_publishable_h-Alm01lWCWvvlWcW-Uqyg_iAub4QH3"
+private const val AUTH_PREFS = "anistream_auth_prefs"
 
 private val Background = Color(0xFF08090D)
 private val SurfaceDark = Color(0xFF14151C)
@@ -69,6 +74,13 @@ data class AnimeDetails(
     val rating: String, val status: String, val studio: String, val characters: List<CharacterInfo>
 )
 data class DownloadInfo(val id: Long, val title: String, val status: String, val progress: Int, val localUri: String = "")
+data class UserSession(
+    val userId: String,
+    val email: String,
+    val fullName: String,
+    val accessToken: String,
+    val createdAt: String
+)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -77,7 +89,13 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private fun request(url: String, method: String = "GET", body: String? = null, supabase: Boolean = false): String {
+private fun request(
+    url: String,
+    method: String = "GET",
+    body: String? = null,
+    supabase: Boolean = false,
+    bearerToken: String? = null
+): String {
     val connection = URL(url).openConnection() as HttpURLConnection
     try {
         connection.requestMethod = method
@@ -86,7 +104,7 @@ private fun request(url: String, method: String = "GET", body: String? = null, s
         connection.setRequestProperty("Accept", "application/json")
         if (supabase) {
             connection.setRequestProperty("apikey", SUPABASE_KEY)
-            connection.setRequestProperty("Authorization", "Bearer $SUPABASE_KEY")
+            connection.setRequestProperty("Authorization", "Bearer ${bearerToken ?: SUPABASE_KEY}")
         }
         if (body != null) {
             connection.doOutput = true
@@ -96,9 +114,112 @@ private fun request(url: String, method: String = "GET", body: String? = null, s
         val code = connection.responseCode
         val stream = if (code in 200..299) connection.inputStream else connection.errorStream
         val result = stream?.bufferedReader()?.use { it.readText() } ?: ""
-        if (code !in 200..299) throw Exception("Server error $code: $result")
+        if (code !in 200..299) {
+            val cleanError = runCatching {
+                val obj = JSONObject(result)
+                obj.optString("msg").ifBlank {
+                    obj.optString("error_description").ifBlank {
+                        obj.optString("message").ifBlank { obj.optString("error") }
+                    }
+                }
+            }.getOrNull()?.takeIf { it.isNotBlank() } ?: "Server error $code: $result"
+            throw Exception(cleanError)
+        }
         return result
-    } finally { connection.disconnect() }
+    } finally {
+        connection.disconnect()
+    }
+}
+
+private fun saveUserSession(context: Context, session: UserSession) {
+    context.getSharedPreferences(AUTH_PREFS, Context.MODE_PRIVATE).edit()
+        .putString("user_id", session.userId)
+        .putString("email", session.email)
+        .putString("full_name", session.fullName)
+        .putString("access_token", session.accessToken)
+        .putString("created_at", session.createdAt)
+        .apply()
+}
+
+private fun loadUserSession(context: Context): UserSession? {
+    val prefs = context.getSharedPreferences(AUTH_PREFS, Context.MODE_PRIVATE)
+    val token = prefs.getString("access_token", null)?.takeIf { it.isNotBlank() } ?: return null
+    val email = prefs.getString("email", "").orEmpty()
+    val userId = prefs.getString("user_id", "").orEmpty()
+    val fullName = prefs.getString("full_name", "").orEmpty()
+    val createdAt = prefs.getString("created_at", "").orEmpty()
+    return UserSession(userId, email, fullName, token, createdAt)
+}
+
+private fun clearUserSession(context: Context) {
+    context.getSharedPreferences(AUTH_PREFS, Context.MODE_PRIVATE).edit().clear().apply()
+}
+
+private fun parseUserSession(root: JSONObject, fallbackToken: String = ""): UserSession {
+    val token = root.optString("access_token").ifBlank { fallbackToken }
+    val userObj = root.optJSONObject("user") ?: root
+    val userId = userObj.optString("id")
+    val email = userObj.optString("email")
+    val createdAt = userObj.optString("created_at").take(10)
+    val metadata = userObj.optJSONObject("user_metadata")
+    val fullName = metadata?.optString("full_name").orEmpty()
+        .ifBlank { metadata?.optString("name").orEmpty() }
+        .ifBlank { email.substringBefore("@") }
+    return UserSession(userId, email, fullName, token, createdAt)
+}
+
+private suspend fun supabaseSignUp(fullName: String, email: String, password: String): Pair<UserSession?, String> = withContext(Dispatchers.IO) {
+    val payload = JSONObject().apply {
+        put("email", email.trim())
+        put("password", password)
+        put("data", JSONObject().put("full_name", fullName.trim()))
+    }
+    val res = request("$SUPABASE_URL/auth/v1/signup", method = "POST", body = payload.toString(), supabase = true)
+    val json = JSONObject(res)
+    val accessToken = json.optString("access_token")
+    if (accessToken.isNotBlank() && accessToken != "null") {
+        Pair(parseUserSession(json), "Account ban gaya aur aap login ho gaye hain!")
+    } else {
+        Pair(null, "Signup successful! Agar email verification on hai toh apna email verify karke Login karein.")
+    }
+}
+
+private suspend fun supabaseSignIn(email: String, password: String): UserSession = withContext(Dispatchers.IO) {
+    val payload = JSONObject().apply {
+        put("email", email.trim())
+        put("password", password)
+    }
+    val res = request(
+        "$SUPABASE_URL/auth/v1/token?grant_type=password",
+        method = "POST",
+        body = payload.toString(),
+        supabase = true
+    )
+    val json = JSONObject(res)
+    val session = parseUserSession(json)
+    if (session.accessToken.isBlank()) throw Exception("Login token nahi mila. Kripya dubara try karein.")
+    session
+}
+
+private suspend fun supabaseFetchProfile(session: UserSession): UserSession = withContext(Dispatchers.IO) {
+    val res = request(
+        "$SUPABASE_URL/auth/v1/user",
+        method = "GET",
+        supabase = true,
+        bearerToken = session.accessToken
+    )
+    parseUserSession(JSONObject(res), fallbackToken = session.accessToken)
+}
+
+private suspend fun supabaseLogout(accessToken: String) = withContext(Dispatchers.IO) {
+    runCatching {
+        request(
+            "$SUPABASE_URL/auth/v1/logout",
+            method = "POST",
+            supabase = true,
+            bearerToken = accessToken
+        )
+    }
 }
 
 private suspend fun fetchAnime(): List<Anime> = withContext(Dispatchers.IO) {
@@ -237,6 +358,7 @@ private fun readDownloads(context: Context): List<DownloadInfo> {
 
 @Composable
 fun AniStreamApp() {
+    val context = LocalContext.current
     var tab by remember { mutableIntStateOf(0) }
     var animeList by remember { mutableStateOf<List<Anime>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
@@ -244,10 +366,20 @@ fun AniStreamApp() {
     var search by remember { mutableStateOf("") }
     var selectedAnime by remember { mutableStateOf<Anime?>(null) }
     var offlineDownload by remember { mutableStateOf<DownloadInfo?>(null) }
+    var userSession by remember { mutableStateOf(loadUserSession(context)) }
 
     LaunchedEffect(Unit) {
         try { animeList = fetchAnime() } catch (e: Exception) { error = e.message ?: "Unable to load anime" }
         loading = false
+    }
+
+    LaunchedEffect(userSession?.accessToken) {
+        val current = userSession ?: return@LaunchedEffect
+        runCatching {
+            val refreshed = supabaseFetchProfile(current)
+            userSession = refreshed
+            saveUserSession(context, refreshed)
+        }
     }
 
     BackHandler(enabled = offlineDownload != null) { offlineDownload = null }
@@ -295,11 +427,26 @@ fun AniStreamApp() {
                             Text("HINDI", color = Gray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         }
                         when (tab) {
-                            0 -> HomeScreen(animeList, loading, error) { selectedAnime = it }
+                            0 -> HomeScreen(
+                                animeList = animeList,
+                                loading = loading,
+                                error = error,
+                                userSession = userSession,
+                                onProfileClick = { tab = 4 },
+                                onAnimeClick = { selectedAnime = it }
+                            )
                             1 -> SearchScreen(animeList, search, { search = it }) { selectedAnime = it }
                             2 -> SimpleScreen("My List", "Your favourite anime will appear here")
                             3 -> DownloadsScreen { offlineDownload = it }
-                            4 -> SimpleScreen("My Profile", "Login to access your profile")
+                            4 -> ProfileScreen(
+                                session = userSession,
+                                onSessionUpdated = { newSession ->
+                                    userSession = newSession
+                                    if (newSession != null) saveUserSession(context, newSession)
+                                    else clearUserSession(context)
+                                },
+                                onOpenDownloads = { tab = 3 }
+                            )
                         }
                     }
                 }
@@ -309,18 +456,417 @@ fun AniStreamApp() {
 }
 
 @Composable
-fun HomeScreen(animeList: List<Anime>, loading: Boolean, error: String?, onAnimeClick: (Anime) -> Unit) {
+fun ProfileScreen(
+    session: UserSession?,
+    onSessionUpdated: (UserSession?) -> Unit,
+    onOpenDownloads: () -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var isSignUp by remember { mutableStateOf(false) }
+    var fullName by remember { mutableStateOf("") }
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var confirmPassword by remember { mutableStateOf("") }
+    var showPassword by remember { mutableStateOf(false) }
+    var loading by remember { mutableStateOf(false) }
+    var errorMsg by remember { mutableStateOf<String?>(null) }
+    var infoMsg by remember { mutableStateOf<String?>(null) }
+    var downloadsCount by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(session) {
+        if (session != null) {
+            downloadsCount = withContext(Dispatchers.IO) { readDownloads(context).size }
+        }
+    }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 18.dp, vertical = 10.dp)
+    ) {
+        if (session == null) {
+            Text(
+                if (isSignUp) "Create Account" else "Welcome Back",
+                color = White,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.ExtraBold
+            )
+            Text(
+                if (isSignUp) "Sign up with Supabase to sync your profile & list."
+                else "Login to access your AniStream Hindi profile.",
+                color = Gray,
+                fontSize = 12.sp
+            )
+            Spacer(Modifier.height(16.dp))
+
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(SurfaceDark)
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Surface(
+                    color = if (!isSignUp) AccentRed else Color.Transparent,
+                    shape = RoundedCornerShape(9.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable {
+                            isSignUp = false
+                            errorMsg = null
+                            infoMsg = null
+                        }
+                ) {
+                    Box(Modifier.padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
+                        Text("LOGIN", color = White, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
+                    }
+                }
+                Surface(
+                    color = if (isSignUp) AccentRed else Color.Transparent,
+                    shape = RoundedCornerShape(9.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable {
+                            isSignUp = true
+                            errorMsg = null
+                            infoMsg = null
+                        }
+                ) {
+                    Box(Modifier.padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
+                        Text("SIGN UP", color = White, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(SurfaceDark)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (isSignUp) {
+                    OutlinedTextField(
+                        value = fullName,
+                        onValueChange = { fullName = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Full Name", color = Gray) },
+                        placeholder = { Text("Enter your name", color = Gray) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = White,
+                            unfocusedTextColor = White,
+                            focusedBorderColor = AccentRed,
+                            unfocusedBorderColor = Gray,
+                            cursorColor = AccentRed
+                        )
+                    )
+                }
+
+                OutlinedTextField(
+                    value = email,
+                    onValueChange = { email = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Email Address", color = Gray) },
+                    placeholder = { Text("name@example.com", color = Gray) },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = White,
+                        unfocusedTextColor = White,
+                        focusedBorderColor = AccentRed,
+                        unfocusedBorderColor = Gray,
+                        cursorColor = AccentRed
+                    )
+                )
+
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Password", color = Gray) },
+                    placeholder = { Text("Minimum 6 characters", color = Gray) },
+                    singleLine = true,
+                    visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        Text(
+                            if (showPassword) "HIDE" else "SHOW",
+                            color = AccentRed,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .clickable { showPassword = !showPassword }
+                                .padding(horizontal = 10.dp)
+                        )
+                    },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = White,
+                        unfocusedTextColor = White,
+                        focusedBorderColor = AccentRed,
+                        unfocusedBorderColor = Gray,
+                        cursorColor = AccentRed
+                    )
+                )
+
+                if (isSignUp) {
+                    OutlinedTextField(
+                        value = confirmPassword,
+                        onValueChange = { confirmPassword = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Confirm Password", color = Gray) },
+                        placeholder = { Text("Re-enter password", color = Gray) },
+                        singleLine = true,
+                        visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = White,
+                            unfocusedTextColor = White,
+                            focusedBorderColor = AccentRed,
+                            unfocusedBorderColor = Gray,
+                            cursorColor = AccentRed
+                        )
+                    )
+                }
+
+                errorMsg?.let {
+                    Surface(color = Color(0xFF2D1219), shape = RoundedCornerShape(8.dp)) {
+                        Text(
+                            it,
+                            color = AccentRed,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
+                }
+
+                infoMsg?.let {
+                    Surface(color = Color(0xFF112A1B), shape = RoundedCornerShape(8.dp)) {
+                        Text(
+                            it,
+                            color = Color(0xFF4CAF50),
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
+                }
+
+                Button(
+                    onClick = {
+                        errorMsg = null
+                        infoMsg = null
+                        val cleanEmail = email.trim()
+                        when {
+                            isSignUp && fullName.trim().length < 2 -> errorMsg = "Kripya apna naam likhein."
+                            !cleanEmail.contains("@") || !cleanEmail.contains(".") -> errorMsg = "Valid email address dalein."
+                            password.length < 6 -> errorMsg = "Password kam se kam 6 characters ka hona chahiye."
+                            isSignUp && password != confirmPassword -> errorMsg = "Password aur Confirm Password match nahi kar rahe."
+                            else -> {
+                                loading = true
+                                scope.launch {
+                                    try {
+                                        if (isSignUp) {
+                                            val (newSession, message) = supabaseSignUp(fullName, cleanEmail, password)
+                                            if (newSession != null) {
+                                                onSessionUpdated(newSession)
+                                            } else {
+                                                infoMsg = message
+                                                isSignUp = false
+                                                password = ""
+                                                confirmPassword = ""
+                                            }
+                                        } else {
+                                            val loggedIn = supabaseSignIn(cleanEmail, password)
+                                            onSessionUpdated(loggedIn)
+                                        }
+                                    } catch (e: Exception) {
+                                        errorMsg = e.message ?: "Authentication fail ho gaya."
+                                    } finally {
+                                        loading = false
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    enabled = !loading,
+                    modifier = Modifier.fillMaxWidth().height(46.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentRed, contentColor = White)
+                ) {
+                    if (loading) {
+                        CircularProgressIndicator(Modifier.size(20.dp), color = White, strokeWidth = 2.dp)
+                    } else {
+                        Text(
+                            if (isSignUp) "CREATE ACCOUNT" else "LOGIN",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+                }
+            }
+        } else {
+            val initial = (session.fullName.firstOrNull() ?: session.email.firstOrNull() ?: 'A').uppercaseChar()
+
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(SurfaceDark)
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    Modifier
+                        .size(62.dp)
+                        .clip(CircleShape)
+                        .background(AccentRed),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(initial.toString(), color = White, fontSize = 26.sp, fontWeight = FontWeight.Black)
+                }
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Surface(color = Color(0xFF163222), shape = RoundedCornerShape(5.dp)) {
+                        Text(
+                            "VERIFIED MEMBER",
+                            color = Color(0xFF4CAF50),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
+                    }
+                    Spacer(Modifier.height(5.dp))
+                    Text(
+                        session.fullName.ifBlank { "AniStream User" },
+                        color = White,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                    Text(session.email, color = Gray, fontSize = 12.sp)
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(SurfaceDark)
+                    .padding(16.dp)
+            ) {
+                Text("ACCOUNT DETAILS", color = AccentRed, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
+                Spacer(Modifier.height(10.dp))
+                InfoLine("Full Name", session.fullName.ifBlank { "Not set" })
+                InfoLine("Email", session.email)
+                InfoLine("User ID", session.userId.ifBlank { "N/A" })
+                InfoLine("Joined On", session.createdAt.ifBlank { "Active" })
+                InfoLine("Auth Server", "Supabase Auth")
+                InfoLine("Saved Downloads", "$downloadsCount Episodes")
+            }
+
+            Spacer(Modifier.height(14.dp))
+
+            infoMsg?.let {
+                Text(it, color = Color(0xFF4CAF50), fontSize = 12.sp, modifier = Modifier.padding(bottom = 10.dp))
+            }
+            errorMsg?.let {
+                Text(it, color = AccentRed, fontSize = 12.sp, modifier = Modifier.padding(bottom = 10.dp))
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                SmallOutlineButton(
+                    text = "↻  Sync Profile",
+                    onClick = {
+                        loading = true
+                        errorMsg = null
+                        infoMsg = null
+                        scope.launch {
+                            try {
+                                val refreshed = supabaseFetchProfile(session)
+                                onSessionUpdated(refreshed)
+                                infoMsg = "Profile details sync ho gayi hain."
+                            } catch (e: Exception) {
+                                errorMsg = e.message ?: "Sync fail ho gaya."
+                            } finally {
+                                loading = false
+                            }
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                    enabled = !loading
+                )
+                SmallOutlineButton(
+                    text = "↓  My Downloads",
+                    onClick = onOpenDownloads,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Spacer(Modifier.height(14.dp))
+
+            Button(
+                onClick = {
+                    loading = true
+                    scope.launch {
+                        supabaseLogout(session.accessToken)
+                        loading = false
+                        onSessionUpdated(null)
+                    }
+                },
+                enabled = !loading,
+                modifier = Modifier.fillMaxWidth().height(46.dp),
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = AccentRed, contentColor = White)
+            ) {
+                Text(
+                    if (loading) "LOGGING OUT..." else "LOGOUT",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun HomeScreen(
+    animeList: List<Anime>,
+    loading: Boolean,
+    error: String?,
+    userSession: UserSession?,
+    onProfileClick: () -> Unit,
+    onAnimeClick: (Anime) -> Unit
+) {
     val movies = animeList.filter { it.animeType.equals("Movie", true) }
     val series = animeList.filter { !it.animeType.equals("Movie", true) }
     val featured = animeList.firstOrNull()
+    val badgeLetter = (userSession?.fullName?.firstOrNull() ?: userSession?.email?.firstOrNull() ?: 'A').uppercaseChar()
+
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("WELCOME BACK", color = AccentRed, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.5.sp)
+                Text(
+                    if (userSession != null) "HELLO, ${userSession.fullName.uppercase()}" else "WELCOME BACK",
+                    color = AccentRed,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 1.5.sp
+                )
                 Text("Discover Anime", color = White, fontSize = 25.sp, fontWeight = FontWeight.ExtraBold)
             }
-            Box(Modifier.size(42.dp).clip(RoundedCornerShape(14.dp)).background(SurfaceDark), contentAlignment = Alignment.Center) {
-                Text("A", color = AccentRed, fontSize = 23.sp, fontWeight = FontWeight.Black)
+            Box(
+                Modifier
+                    .size(42.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(SurfaceDark)
+                    .clickable { onProfileClick() },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(badgeLetter.toString(), color = AccentRed, fontSize = 21.sp, fontWeight = FontWeight.Black)
             }
         }
         Spacer(Modifier.height(12.dp))
