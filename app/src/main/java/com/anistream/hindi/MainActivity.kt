@@ -20,6 +20,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -36,6 +37,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -43,6 +45,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
@@ -65,11 +68,14 @@ private const val DOWNLOAD_PREFS = "anistream_download_prefs"
 private val Background = Color(0xFF08090D)
 private val SurfaceDark = Color(0xFF14151C)
 private val AccentRed = Color(0xFFFF1744)
+private val SeekBlue = Color(0xFF5AB4FF)
 private val White = Color.White
 private val Gray = Color(0xFF999BA5)
 
 private val animeDetailsCache = mutableMapOf<String, AnimeDetails>()
 private val seasonsCache = mutableMapOf<String, List<AnimeSeason>>()
+private val episodesCache = mutableMapOf<String, List<AnimeEpisode>>()
+private val videoServersCache = mutableMapOf<String, List<VideoServer>>()
 
 data class Anime(val id: String, val title: String, val posterUrl: String, val description: String, val animeType: String)
 data class AnimeSeason(val id: String, val animeId: String, val seasonNumber: Int, val title: String)
@@ -116,8 +122,8 @@ private fun request(
     val connection = URL(url).openConnection() as HttpURLConnection
     try {
         connection.requestMethod = method
-        connection.connectTimeout = 15000
-        connection.readTimeout = 20000
+        connection.connectTimeout = 12000
+        connection.readTimeout = 15000
         connection.setRequestProperty("Accept", "application/json")
         if (supabase) {
             connection.setRequestProperty("apikey", SUPABASE_KEY)
@@ -348,19 +354,27 @@ private suspend fun fetchSeasons(animeId: String, forceRefresh: Boolean = false)
     list
 }
 
-private suspend fun fetchEpisodes(seasonId: String): List<AnimeEpisode> = withContext(Dispatchers.IO) {
+private suspend fun fetchEpisodes(seasonId: String, forceRefresh: Boolean = false): List<AnimeEpisode> = withContext(Dispatchers.IO) {
+    if (!forceRefresh) {
+        episodesCache[seasonId]?.let { return@withContext it }
+    }
     val url = "$SUPABASE_URL/rest/v1/episodes?select=id,episode_number,title,description&season_id=eq.${Uri.encode(seasonId)}&is_published=eq.true&order=episode_number.asc"
     val a = JSONArray(request(url, supabase = true))
-    (0 until a.length()).map { i ->
+    val list = (0 until a.length()).map { i ->
         val x = a.getJSONObject(i)
         AnimeEpisode(x.optString("id"), x.optInt("episode_number"), x.optString("title"), x.optString("description"))
     }
+    episodesCache[seasonId] = list
+    list
 }
 
-private suspend fun fetchVideoServers(episodeId: String): List<VideoServer> = withContext(Dispatchers.IO) {
+private suspend fun fetchVideoServers(episodeId: String, forceRefresh: Boolean = false): List<VideoServer> = withContext(Dispatchers.IO) {
+    if (!forceRefresh) {
+        videoServersCache[episodeId]?.takeIf { it.isNotEmpty() }?.let { return@withContext it }
+    }
     val url = "$SUPABASE_URL/rest/v1/video_servers?select=id,episode_id,server_name,video_url,download_url,quality,language&episode_id=eq.${Uri.encode(episodeId)}"
     val a = JSONArray(request(url, supabase = true))
-    (0 until a.length()).mapNotNull { i ->
+    val list = (0 until a.length()).mapNotNull { i ->
         val x = a.getJSONObject(i)
         val watch = x.optString("video_url").takeUnless { it.isBlank() || it == "null" } ?: return@mapNotNull null
         VideoServer(
@@ -368,6 +382,31 @@ private suspend fun fetchVideoServers(episodeId: String): List<VideoServer> = wi
             x.optString("download_url").takeUnless { it == "null" }.orEmpty(),
             x.optString("quality"), x.optString("language").ifBlank { "Hindi" }
         )
+    }
+    if (list.isNotEmpty()) videoServersCache[episodeId] = list
+    list
+}
+
+private suspend fun prefetchVideoServersForSeason(episodes: List<AnimeEpisode>) = withContext(Dispatchers.IO) {
+    val missingIds = episodes.map { it.id }.filter { !videoServersCache.containsKey(it) }
+    if (missingIds.isEmpty()) return@withContext
+    runCatching {
+        val joined = missingIds.joinToString(",") { Uri.encode(it) }
+        val url = "$SUPABASE_URL/rest/v1/video_servers?select=id,episode_id,server_name,video_url,download_url,quality,language&episode_id=in.($joined)"
+        val a = JSONArray(request(url, supabase = true))
+        val grouped = mutableMapOf<String, MutableList<VideoServer>>()
+        for (i in 0 until a.length()) {
+            val x = a.getJSONObject(i)
+            val watch = x.optString("video_url").takeUnless { it.isBlank() || it == "null" } ?: continue
+            val epId = x.optString("episode_id")
+            val server = VideoServer(
+                x.optString("id"), epId, x.optString("server_name"), watch,
+                x.optString("download_url").takeUnless { it == "null" }.orEmpty(),
+                x.optString("quality"), x.optString("language").ifBlank { "Hindi" }
+            )
+            grouped.getOrPut(epId) { mutableListOf() }.add(server)
+        }
+        grouped.forEach { (epId, servers) -> videoServersCache[epId] = servers }
     }
 }
 
@@ -427,6 +466,19 @@ private fun formatBytes(bytes: Long): String {
     if (bytes <= 0L) return "0 MB"
     val mb = bytes.toDouble() / (1024.0 * 1024.0)
     return String.format(Locale.US, "%.1f MB", mb)
+}
+
+private fun formatDuration(ms: Long): String {
+    if (ms <= 0L) return "00:00"
+    val totalSeconds = ms / 1000L
+    val hours = totalSeconds / 3600L
+    val minutes = (totalSeconds % 3600L) / 60L
+    val seconds = totalSeconds % 60L
+    return if (hours > 0L) {
+        String.format(Locale.US, "%d:%02d:%02d", hours, minutes, seconds)
+    } else {
+        String.format(Locale.US, "%02d:%02d", minutes, seconds)
+    }
 }
 
 private fun saveDownloadSource(context: Context, id: Long, url: String, title: String) {
@@ -1546,13 +1598,18 @@ fun AnimeDetailsScreen(
     onBack: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
-    var details by remember(anime.id) { mutableStateOf<AnimeDetails?>(null) }
-    var detailsLoading by remember(anime.id) { mutableStateOf(true) }
+    val cachedDetails = remember(anime.title) { animeDetailsCache[anime.title.trim().lowercase(Locale.ROOT)] }
+    val cachedSeasons = remember(anime.id) { seasonsCache[anime.id] }
+
+    var details by remember(anime.id) { mutableStateOf(cachedDetails) }
+    var detailsLoading by remember(anime.id) { mutableStateOf(cachedDetails == null) }
     var detailsError by remember(anime.id) { mutableStateOf<String?>(null) }
-    var seasons by remember(anime.id) { mutableStateOf<List<AnimeSeason>>(emptyList()) }
-    var seasonsLoading by remember(anime.id) { mutableStateOf(true) }
+
+    var seasons by remember(anime.id) { mutableStateOf(cachedSeasons ?: emptyList()) }
+    var seasonsLoading by remember(anime.id) { mutableStateOf(cachedSeasons == null) }
     var seasonsError by remember(anime.id) { mutableStateOf<String?>(null) }
-    var selectedSeason by remember(anime.id) { mutableStateOf<AnimeSeason?>(null) }
+    var selectedSeason by remember(anime.id) { mutableStateOf(cachedSeasons?.firstOrNull()) }
+
     var episodes by remember(anime.id) { mutableStateOf<List<AnimeEpisode>>(emptyList()) }
     var episodesLoading by remember(anime.id) { mutableStateOf(false) }
     var episodesError by remember(anime.id) { mutableStateOf<String?>(null) }
@@ -1591,23 +1648,43 @@ fun AnimeDetailsScreen(
         if (playingEpisode != null) playingEpisode = null else onBack()
     }
     LaunchedEffect(anime.id) {
-        loadDetails()
-        loadSeasons()
+        if (details == null) loadDetails()
+        if (seasons.isEmpty()) loadSeasons()
     }
     LaunchedEffect(selectedSeason?.id) {
         val season = selectedSeason
-        if (season == null) episodes = emptyList() else {
-            episodesLoading = true
-            episodesError = null
-            try { episodes = fetchEpisodes(season.id) } catch (e: Exception) { episodesError = e.message; episodes = emptyList() }
-            episodesLoading = false
+        if (season == null) {
+            episodes = emptyList()
+        } else {
+            val cachedEps = episodesCache[season.id]
+            if (cachedEps != null) {
+                episodes = cachedEps
+                episodesLoading = false
+                launch { prefetchVideoServersForSeason(cachedEps) }
+            } else {
+                episodesLoading = true
+                episodesError = null
+                try {
+                    val fetched = fetchEpisodes(season.id)
+                    episodes = fetched
+                    launch { prefetchVideoServersForSeason(fetched) }
+                } catch (e: Exception) {
+                    episodesError = e.message
+                    episodes = emptyList()
+                }
+                episodesLoading = false
+            }
         }
     }
     val episodeIndex = episodes.indexOfFirst { it.id == playingEpisode?.id }
     if (playingEpisode != null) {
-        PlayerScreen(playingEpisode!!, episodes, episodeIndex, onBack = { playingEpisode = null }) {
-            if (it in episodes.indices) playingEpisode = episodes[it]
-        }
+        PlayerScreen(
+            episode = playingEpisode!!,
+            episodes = episodes,
+            episodeIndex = episodeIndex,
+            onBack = { playingEpisode = null },
+            onEpisodeChange = { if (it in episodes.indices) playingEpisode = episodes[it] }
+        )
         return
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 22.dp)) {
@@ -1710,65 +1787,153 @@ fun EpisodeCard(episode: AnimeEpisode, selected: Boolean = false, onClick: () ->
 }
 
 @Composable
-fun PlayerScreen(episode: AnimeEpisode, episodes: List<AnimeEpisode>, episodeIndex: Int, onBack: () -> Unit, onEpisodeChange: (Int) -> Unit) {
-    var servers by remember(episode.id) { mutableStateOf<List<VideoServer>>(emptyList()) }
-    var loading by remember(episode.id) { mutableStateOf(true) }
+fun PlayerScreen(
+    episode: AnimeEpisode,
+    episodes: List<AnimeEpisode>,
+    episodeIndex: Int,
+    onBack: () -> Unit,
+    onEpisodeChange: (Int) -> Unit
+) {
+    val cachedServers = remember(episode.id) { videoServersCache[episode.id].orEmpty() }
+    val initialLang = remember(cachedServers) {
+        cachedServers.firstOrNull { it.language.equals("Hindi", true) }?.language ?: cachedServers.firstOrNull()?.language.orEmpty()
+    }
+    val initialQual = remember(cachedServers, initialLang) {
+        val m = cachedServers.filter { it.language.equals(initialLang, true) }
+        m.firstOrNull { it.quality.equals("720p", true) }?.quality ?: m.firstOrNull()?.quality.orEmpty()
+    }
+
+    var servers by remember(episode.id) { mutableStateOf(cachedServers) }
+    var loading by remember(episode.id) { mutableStateOf(cachedServers.isEmpty()) }
     var error by remember(episode.id) { mutableStateOf<String?>(null) }
-    var language by remember(episode.id) { mutableStateOf("") }
-    var quality by remember(episode.id) { mutableStateOf("720p") }
+    var language by remember(episode.id) { mutableStateOf(initialLang) }
+    var quality by remember(episode.id) { mutableStateOf(initialQual) }
     var languageMenu by remember { mutableStateOf(false) }
     var qualityMenu by remember { mutableStateOf(false) }
-    var fullscreen by remember { mutableStateOf(false) }
+    var fullscreen by remember { mutableStateOf(true) }
     var downloadMessage by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
-    BackHandler(enabled = fullscreen) { fullscreen = false }
+
+    BackHandler {
+        if (fullscreen) {
+            onBack()
+        } else {
+            onBack()
+        }
+    }
 
     LaunchedEffect(episode.id) {
-        loading = true; error = null; servers = emptyList(); fullscreen = false; downloadMessage = null
-        try {
-            servers = fetchVideoServers(episode.id)
-            if (servers.isEmpty()) error = "Is Episode ke liye abhi video link add nahi hua."
-            else {
-                language = servers.firstOrNull { it.language.equals("Hindi", true) }?.language ?: servers.first().language
-                val matching = servers.filter { it.language.equals(language, true) }
-                quality = matching.firstOrNull { it.quality.equals("720p", true) }?.quality ?: matching.first().quality
+        downloadMessage = null
+        if (servers.isEmpty()) {
+            loading = true
+            error = null
+            try {
+                val fetched = fetchVideoServers(episode.id)
+                servers = fetched
+                if (fetched.isEmpty()) {
+                    error = "Is Episode ke liye abhi video link add nahi hua."
+                } else {
+                    language = fetched.firstOrNull { it.language.equals("Hindi", true) }?.language ?: fetched.first().language
+                    val matching = fetched.filter { it.language.equals(language, true) }
+                    quality = matching.firstOrNull { it.quality.equals("720p", true) }?.quality ?: matching.first().quality
+                }
+            } catch (e: Exception) {
+                error = e.message ?: "Video links load nahi ho paye"
             }
-        } catch (e: Exception) { error = e.message ?: "Video links load nahi ho paye" }
-        loading = false
+            loading = false
+        }
     }
+
     val languageServers = servers.filter { it.language.equals(language, true) }
+    val allLanguages = servers.map { it.language }.distinct()
     val qualities = languageServers.map { it.quality }.distinct().sortedBy {
         listOf("1080p", "720p", "480p").indexOf(it).let { n -> if (n < 0) 99 else n }
     }
     val selected = languageServers.firstOrNull { it.quality.equals(quality, true) } ?: languageServers.firstOrNull()
+    val dlUrl = selected?.downloadUrl.orEmpty()
 
-    Column(Modifier.fillMaxSize().background(Background).then(if (fullscreen) Modifier else Modifier.verticalScroll(rememberScrollState()))) {
-        if (!fullscreen) {
-            Row(Modifier.fillMaxWidth().background(SurfaceDark).padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("‹", color = White, fontSize = 27.sp, modifier = Modifier.clickable { onBack() })
-                Spacer(Modifier.width(10.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("ANISTREAM PLAYER", color = AccentRed, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
-                    Text("Episode ${episode.episodeNumber}", color = Gray, fontSize = 10.sp)
-                }
-                SmallOutlineButton("⛶", onClick = { fullscreen = true })
-            }
-            Text(episode.title.ifBlank { "Episode ${episode.episodeNumber}" }, color = White, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(15.dp))
+    fun triggerDownload() {
+        if (dlUrl.isBlank()) {
+            downloadMessage = "Is server par download link uplabdh nahi hai."
+            return
         }
+        try {
+            startDownload(context, dlUrl, "AniStream_Ep_${episode.episodeNumber}_${selected?.quality}")
+            downloadMessage = "Download start ho gaya! Downloads tab mein dekhein."
+        } catch (e: Exception) {
+            downloadMessage = e.message ?: "Download start nahi hua."
+        }
+    }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(if (fullscreen) Color.Black else Background)
+            .then(if (fullscreen) Modifier else Modifier.verticalScroll(rememberScrollState()))
+    ) {
         when {
-            loading -> Box(Modifier.fillMaxWidth().height(if (fullscreen) 1.dp else 220.dp).background(Color.Black), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = AccentRed) }
-            error != null -> Box(Modifier.fillMaxWidth().height(220.dp).background(Color.Black), contentAlignment = Alignment.Center) { Text(error ?: "Video unavailable", color = White) }
-            selected != null -> WatchPlayer(selected.videoUrl, episode.id, fullscreen) { fullscreen = false }
+            loading -> Box(
+                Modifier
+                    .fillMaxWidth()
+                    .then(if (fullscreen) Modifier.fillMaxSize() else Modifier.height(235.dp))
+                    .background(Color.Black),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(color = AccentRed)
+            }
+            error != null -> Box(
+                Modifier
+                    .fillMaxWidth()
+                    .then(if (fullscreen) Modifier.fillMaxSize() else Modifier.height(235.dp))
+                    .background(Color.Black),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(error ?: "Video unavailable", color = White, fontSize = 13.sp)
+                    Spacer(Modifier.height(12.dp))
+                    SmallOutlineButton("‹  Go Back", onClick = onBack)
+                }
+            }
+            selected != null -> WatchPlayer(
+                videoUrl = selected.videoUrl,
+                episodeId = episode.id,
+                episodeTitle = "EP ${episode.episodeNumber} • ${episode.title.ifBlank { "Episode ${episode.episodeNumber}" }}",
+                fullscreen = fullscreen,
+                hasPrevious = episodeIndex > 0,
+                hasNext = episodeIndex >= 0 && episodeIndex < episodes.lastIndex,
+                currentLanguage = language,
+                availableLanguages = allLanguages,
+                currentQuality = selected.quality,
+                availableQualities = qualities,
+                canDownload = dlUrl.isNotBlank(),
+                onSelectLanguage = { lang ->
+                    language = lang
+                    val avail = servers.filter { it.language.equals(lang, true) }
+                    quality = avail.firstOrNull { it.quality.equals("720p", true) }?.quality ?: avail.firstOrNull()?.quality.orEmpty()
+                },
+                onSelectQuality = { q -> quality = q },
+                onDownloadClick = { triggerDownload() },
+                onPreviousEpisode = { if (episodeIndex > 0) onEpisodeChange(episodeIndex - 1) },
+                onNextEpisode = { if (episodeIndex < episodes.lastIndex) onEpisodeChange(episodeIndex + 1) },
+                onToggleFullscreen = { fullscreen = !fullscreen },
+                onBack = onBack
+            )
         }
+
         if (!fullscreen && servers.isNotEmpty()) {
             Column(Modifier.padding(14.dp)) {
-                Text("PLAYBACK SETTINGS", color = Gray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Episode ${episode.episodeNumber}: ${episode.title.ifBlank { "Episode ${episode.episodeNumber}" }}",
+                    color = White,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+                Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Box(Modifier.weight(1f)) {
                         SmallOutlineButton("Audio: ${language.ifBlank { "Select" }}", onClick = { languageMenu = true }, modifier = Modifier.fillMaxWidth())
                         DropdownMenu(languageMenu, { languageMenu = false }) {
-                            servers.map { it.language }.distinct().forEach { lang ->
+                            allLanguages.forEach { lang ->
                                 DropdownMenuItem(text = { Text(lang) }, onClick = {
                                     language = lang
                                     val avail = servers.filter { it.language.equals(lang, true) }
@@ -1786,53 +1951,52 @@ fun PlayerScreen(episode: AnimeEpisode, episodes: List<AnimeEpisode>, episodeInd
                     }
                 }
                 Spacer(Modifier.height(9.dp))
-                val dlUrl = selected?.downloadUrl.orEmpty()
                 SmallOutlineButton(
                     text = if (dlUrl.isBlank()) "↓  Download link unavailable" else "↓  Download Episode",
-                    onClick = {
-                        try {
-                            startDownload(context, dlUrl, "AniStream_Ep_${episode.episodeNumber}_${selected?.quality}")
-                            downloadMessage = "Download start ho gaya. Progress Downloads tab mein dekho."
-                        } catch (e: Exception) { downloadMessage = e.message ?: "Download start nahi hua." }
-                    },
+                    onClick = { triggerDownload() },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = dlUrl.isNotBlank()
                 )
                 downloadMessage?.let { Text(it, color = AccentRed, fontSize = 11.sp, modifier = Modifier.padding(top = 7.dp)) }
-                selected?.let { Text("Server: ${it.serverName}  •  ${it.quality}  •  Double tap left/right for 10s skip", color = Gray, fontSize = 10.sp, modifier = Modifier.padding(top = 9.dp)) }
-            }
-        }
-        if (!fullscreen) {
-            Column(Modifier.padding(horizontal = 14.dp)) {
-                Text("EPISODE NAVIGATION", color = Gray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(14.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     SmallOutlineButton("← Previous", onClick = { onEpisodeChange(episodeIndex - 1) }, modifier = Modifier.weight(1f), enabled = episodeIndex > 0)
                     SmallOutlineButton("Next Episode →", onClick = { onEpisodeChange(episodeIndex + 1) }, modifier = Modifier.weight(1f), enabled = episodeIndex >= 0 && episodeIndex < episodes.lastIndex, selected = true)
                 }
-                Spacer(Modifier.height(20.dp))
             }
         }
     }
 }
 
 @Composable
-fun WatchPlayer(videoUrl: String, episodeId: String, fullscreen: Boolean, onExitFullscreen: () -> Unit) {
+fun WatchPlayer(
+    videoUrl: String,
+    episodeId: String,
+    episodeTitle: String,
+    fullscreen: Boolean,
+    hasPrevious: Boolean,
+    hasNext: Boolean,
+    currentLanguage: String,
+    availableLanguages: List<String>,
+    currentQuality: String,
+    availableQualities: List<String>,
+    canDownload: Boolean,
+    onSelectLanguage: (String) -> Unit,
+    onSelectQuality: (String) -> Unit,
+    onDownloadClick: () -> Unit,
+    onPreviousEpisode: () -> Unit,
+    onNextEpisode: () -> Unit,
+    onToggleFullscreen: () -> Unit,
+    onBack: () -> Unit
+) {
     val context = LocalContext.current
     val activity = context as? Activity
-    var seekOverlay by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(seekOverlay) {
-        if (seekOverlay != null) {
-            delay(750)
-            seekOverlay = null
-        }
-    }
 
     val isWebPage = remember(videoUrl) {
         val lower = videoUrl.lowercase()
         !(lower.contains(".mp4") || lower.contains(".m3u8") || lower.contains(".mpd") || lower.contains(".mkv") || lower.contains(".webm"))
     }
+
     DisposableEffect(activity, fullscreen) {
         val window = activity?.window
         val oldOrientation = activity?.requestedOrientation
@@ -1847,8 +2011,8 @@ fun WatchPlayer(videoUrl: String, episodeId: String, fullscreen: Boolean, onExit
                 }
             }
         } else {
-            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-            window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             window?.let {
                 WindowCompat.setDecorFitsSystemWindows(it, true)
                 WindowInsetsControllerCompat(it, it.decorView).show(WindowInsetsCompat.Type.systemBars())
@@ -1863,11 +2027,12 @@ fun WatchPlayer(videoUrl: String, episodeId: String, fullscreen: Boolean, onExit
             }
         }
     }
+
     if (isWebPage) {
         Box(
             Modifier
                 .fillMaxWidth()
-                .then(if (fullscreen) Modifier.fillMaxSize() else Modifier.height(230.dp))
+                .then(if (fullscreen) Modifier.fillMaxSize() else Modifier.height(235.dp))
                 .background(Color.Black)
         ) {
             AndroidView(
@@ -1886,119 +2051,437 @@ fun WatchPlayer(videoUrl: String, episodeId: String, fullscreen: Boolean, onExit
                 update = { if (it.url != videoUrl) it.loadUrl(videoUrl) },
                 modifier = Modifier.fillMaxSize()
             )
-            if (fullscreen) {
-                SmallOutlineButton(
-                    text = "✕",
-                    onClick = onExitFullscreen,
-                    modifier = Modifier.align(Alignment.TopEnd).padding(10.dp)
-                )
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(Color(0x88000000))
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("←", color = White, fontSize = 22.sp, modifier = Modifier.clickable { onBack() }.padding(end = 12.dp))
+                Text(episodeTitle, color = White, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, modifier = Modifier.weight(1f))
+                PlayerIconChip(if (fullscreen) "↙" else "⛶") { onToggleFullscreen() }
             }
         }
     } else {
-        val player = remember(context, episodeId) { ExoPlayer.Builder(context).build() }
-        DisposableEffect(player) { onDispose { player.release() } }
+        val player = remember(context) { ExoPlayer.Builder(context).build() }
+        var isPlaying by remember { mutableStateOf(true) }
+        var isBuffering by remember { mutableStateOf(true) }
+        var currentPos by remember { mutableLongStateOf(0L) }
+        var duration by remember { mutableLongStateOf(0L) }
+        var controlsVisible by remember { mutableStateOf(true) }
+        var isLocked by remember { mutableStateOf(false) }
+        var normalSpeed by remember { mutableFloatStateOf(1.0f) }
+        var isHolding2x by remember { mutableStateOf(false) }
+        var isZoomed by remember { mutableStateOf(false) }
+        var seekToast by remember { mutableStateOf<String?>(null) }
+        var showAudioPopup by remember { mutableStateOf(false) }
+        var showQualityPopup by remember { mutableStateOf(false) }
+
+        DisposableEffect(player) {
+            val listener = object : Player.Listener {
+                override fun onIsPlayingChanged(playing: Boolean) {
+                    isPlaying = playing
+                }
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    isBuffering = playbackState == Player.STATE_BUFFERING
+                    if (playbackState == Player.STATE_READY) {
+                        duration = player.duration.coerceAtLeast(0L)
+                    }
+                }
+            }
+            player.addListener(listener)
+            onDispose {
+                player.removeListener(listener)
+                player.release()
+            }
+        }
+
         LaunchedEffect(player, videoUrl) {
-            player.stop()
-            player.clearMediaItems()
             player.setMediaItem(MediaItem.fromUri(videoUrl))
             player.prepare()
             player.playWhenReady = true
+            player.setPlaybackSpeed(normalSpeed)
+        }
+
+        LaunchedEffect(player) {
+            while (true) {
+                currentPos = player.currentPosition.coerceAtLeast(0L)
+                val dur = player.duration
+                if (dur > 0L) duration = dur
+                delay(400)
+            }
+        }
+
+        LaunchedEffect(controlsVisible, isPlaying, isLocked, showAudioPopup, showQualityPopup) {
+            if (controlsVisible && isPlaying && !showAudioPopup && !showQualityPopup) {
+                delay(3500)
+                controlsVisible = false
+            }
+        }
+
+        LaunchedEffect(seekToast) {
+            if (seekToast != null) {
+                delay(650)
+                seekToast = null
+            }
         }
 
         fun seekByMillis(deltaMs: Long) {
+            if (isLocked) return
             val target = (player.currentPosition + deltaMs).coerceAtLeast(0L)
             val dur = player.duration
-            player.seekTo(if (dur > 0) target.coerceAtMost(dur) else target)
-            seekOverlay = if (deltaMs < 0) "⏪  -10 Seconds" else "+10 Seconds  ⏩"
+            val finalPos = if (dur > 0L) target.coerceAtMost(dur) else target
+            player.seekTo(finalPos)
+            currentPos = finalPos
+            seekToast = if (deltaMs < 0L) "⏪ 10s" else "10s ⏩"
         }
 
-        Column(Modifier.fillMaxWidth()) {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .then(if (fullscreen) Modifier.fillMaxSize() else Modifier.height(230.dp))
-                    .background(Color.Black)
-            ) {
-                AndroidView(
-                    factory = { ctx ->
-                        PlayerView(ctx).apply {
-                            setPlayer(player)
-                            useController = true
-                            setControllerShowTimeoutMs(3500)
-                            setControllerHideOnTouch(true)
-                            setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
-                            val detector = GestureDetector(ctx, object : GestureDetector.SimpleOnGestureListener() {
-                                override fun onDown(e: MotionEvent): Boolean = true
-                                override fun onDoubleTap(e: MotionEvent): Boolean {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .then(if (fullscreen) Modifier.fillMaxSize() else Modifier.height(235.dp))
+                .background(Color.Black)
+        ) {
+            AndroidView(
+                factory = { ctx ->
+                    PlayerView(ctx).apply {
+                        setPlayer(player)
+                        useController = false
+                        keepScreenOn = true
+                        val detector = GestureDetector(ctx, object : GestureDetector.SimpleOnGestureListener() {
+                            override fun onDown(e: MotionEvent): Boolean = true
+
+                            override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                                controlsVisible = !controlsVisible
+                                return true
+                            }
+
+                            override fun onDoubleTap(e: MotionEvent): Boolean {
+                                if (!isLocked) {
                                     val isLeft = e.x < (width / 2f)
                                     seekByMillis(if (isLeft) -10_000L else 10_000L)
-                                    return true
                                 }
-                            })
-                            setOnTouchListener { _, event ->
-                                detector.onTouchEvent(event)
-                                false
+                                return true
                             }
+
+                            override fun onLongPress(e: MotionEvent) {
+                                if (!isLocked) {
+                                    isHolding2x = true
+                                    player.setPlaybackSpeed(2.0f)
+                                }
+                            }
+                        })
+                        setOnTouchListener { _, event ->
+                            detector.onTouchEvent(event)
+                            if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
+                                if (isHolding2x) {
+                                    isHolding2x = false
+                                    player.setPlaybackSpeed(normalSpeed)
+                                }
+                            }
+                            true
                         }
-                    },
-                    update = { it.setPlayer(player); it.useController = true },
-                    modifier = Modifier.fillMaxSize()
+                    }
+                },
+                update = { view ->
+                    view.setPlayer(player)
+                    view.useController = false
+                    val scale = if (isZoomed) 1.18f else 1.0f
+                    view.scaleX = scale
+                    view.scaleY = scale
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+
+            if (isBuffering) {
+                CircularProgressIndicator(
+                    color = SeekBlue,
+                    modifier = Modifier.align(Alignment.Center).size(38.dp),
+                    strokeWidth = 3.dp
                 )
+            }
 
-                seekOverlay?.let { label ->
-                    Surface(
-                        color = Color(0xCC14151C),
-                        shape = RoundedCornerShape(20.dp),
-                        modifier = Modifier.align(Alignment.Center)
-                    ) {
-                        Text(
-                            label,
-                            color = White,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp)
-                        )
-                    }
-                }
-
-                if (fullscreen) {
-                    Row(
-                        Modifier.align(Alignment.TopEnd).padding(10.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        SmallOutlineButton(text = "⏪ -10s", onClick = { seekByMillis(-10_000L) })
-                        SmallOutlineButton(text = "+10s ⏩", onClick = { seekByMillis(10_000L) })
-                        SmallOutlineButton(text = "✕", onClick = onExitFullscreen)
-                    }
+            if (isHolding2x) {
+                Surface(
+                    color = Color(0xCC000000),
+                    shape = RoundedCornerShape(20.dp),
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 18.dp)
+                ) {
+                    Text(
+                        "2X Speed ▶▶",
+                        color = White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 7.dp)
+                    )
                 }
             }
-            if (!fullscreen) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .background(SurfaceDark)
-                        .padding(horizontal = 14.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
+
+            seekToast?.let { text ->
+                Surface(
+                    color = Color(0xBB000000),
+                    shape = RoundedCornerShape(22.dp),
+                    modifier = Modifier.align(Alignment.Center)
                 ) {
-                    SmallOutlineButton(
-                        text = "⏪  -10s",
-                        onClick = { seekByMillis(-10_000L) },
-                        modifier = Modifier.weight(1f)
-                    )
                     Text(
-                        "Double-tap video left/right",
-                        color = Gray,
-                        fontSize = 10.sp
+                        text,
+                        color = White,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 9.dp)
                     )
-                    SmallOutlineButton(
-                        text = "+10s  ⏩",
-                        onClick = { seekByMillis(10_000L) },
-                        modifier = Modifier.weight(1f)
-                    )
+                }
+            }
+
+            if (controlsVisible) {
+                if (isLocked) {
+                    Box(
+                        Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(20.dp)
+                    ) {
+                        PlayerCirclePill("🔒") { isLocked = false }
+                    }
+                } else {
+                    Column(
+                        Modifier
+                            .fillMaxSize()
+                            .background(Color(0x55000000))
+                            .padding(horizontal = 14.dp, vertical = 10.dp)
+                    ) {
+                        // Top Bar (like Screenshot 2: Back arrow, title, Audio, Quality, HW)
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "←",
+                                color = White,
+                                fontSize = 24.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .clickable { onBack() }
+                                    .padding(end = 12.dp, top = 2.dp, bottom = 2.dp)
+                            )
+                            Text(
+                                episodeTitle,
+                                color = White,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Spacer(Modifier.width(8.dp))
+
+                            Box {
+                                PlayerTopIcon("♪") { showAudioPopup = true }
+                                DropdownMenu(expanded = showAudioPopup, onDismissRequest = { showAudioPopup = false }) {
+                                    availableLanguages.forEach { lang ->
+                                        DropdownMenuItem(
+                                            text = { Text(if (lang.equals(currentLanguage, true)) "✓ $lang" else lang) },
+                                            onClick = {
+                                                onSelectLanguage(lang)
+                                                showAudioPopup = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(Modifier.width(12.dp))
+
+                            Box {
+                                PlayerTopIcon(currentQuality.ifBlank { "HD" }) { showQualityPopup = true }
+                                DropdownMenu(expanded = showQualityPopup, onDismissRequest = { showQualityPopup = false }) {
+                                    availableQualities.forEach { q ->
+                                        DropdownMenuItem(
+                                            text = { Text(if (q.equals(currentQuality, true)) "✓ $q" else q) },
+                                            onClick = {
+                                                onSelectQuality(q)
+                                                showQualityPopup = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+
+                            if (canDownload) {
+                                Spacer(Modifier.width(12.dp))
+                                PlayerTopIcon("↓") { onDownloadClick() }
+                            }
+
+                            Spacer(Modifier.width(12.dp))
+                            Text("HW", color = White, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
+                        }
+
+                        Spacer(Modifier.height(12.dp))
+
+                        // Left Quick Action Pills (like Screenshot 2: 1X, Crop/Fit, Rotate)
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val speedLabel = if (normalSpeed == 1.0f) "1X" else "${normalSpeed}X"
+                            PlayerCirclePill(speedLabel) {
+                                val speeds = listOf(1.0f, 1.25f, 1.5f, 2.0f)
+                                val nextIdx = (speeds.indexOf(normalSpeed) + 1) % speeds.size
+                                normalSpeed = speeds[nextIdx]
+                                player.setPlaybackSpeed(normalSpeed)
+                            }
+                            PlayerCirclePill(if (isZoomed) "ZOOM" else "FIT") {
+                                isZoomed = !isZoomed
+                            }
+                            PlayerCirclePill("⟳") {
+                                onToggleFullscreen()
+                            }
+                        }
+
+                        Spacer(Modifier.weight(1f))
+
+                        // Bottom Timeline Row (00:03 --- slider --- 22:55)
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                formatDuration(currentPos),
+                                color = White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Slider(
+                                value = if (duration > 0L) (currentPos.toFloat() / duration.toFloat()).coerceIn(0f, 1f) else 0f,
+                                onValueChange = { fraction ->
+                                    if (duration > 0L) {
+                                        val newPos = (fraction * duration).toLong()
+                                        currentPos = newPos
+                                        player.seekTo(newPos)
+                                    }
+                                },
+                                modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
+                                colors = SliderDefaults.colors(
+                                    thumbColor = SeekBlue,
+                                    activeTrackColor = SeekBlue,
+                                    inactiveTrackColor = Color(0x66FFFFFF)
+                                )
+                            )
+                            Text(
+                                formatDuration(duration),
+                                color = White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        // Bottom Control Bar (Lock | Prev, Play/Pause, Next | Fit, Fullscreen)
+                        Row(
+                            Modifier.fillMaxWidth().padding(bottom = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            PlayerBottomIcon("🔓", enabled = true) { isLocked = true }
+
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(34.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                PlayerBottomIcon("⏮", enabled = hasPrevious) { onPreviousEpisode() }
+                                Text(
+                                    if (isPlaying) "⏸" else "▶",
+                                    color = White,
+                                    fontSize = 30.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier
+                                        .clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = null
+                                        ) {
+                                            if (player.isPlaying) player.pause() else player.play()
+                                        }
+                                        .padding(horizontal = 6.dp)
+                                )
+                                PlayerBottomIcon("⏭", enabled = hasNext) { onNextEpisode() }
+                            }
+
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                PlayerBottomIcon("▭", enabled = true) { isZoomed = !isZoomed }
+                                PlayerBottomIcon(if (fullscreen) "↙" else "⛶", enabled = true) { onToggleFullscreen() }
+                            }
+                        }
+                    }
                 }
             }
         }
+    }
+}
+
+@Composable
+fun PlayerCirclePill(label: String, onClick: () -> Unit) {
+    Surface(
+        color = Color(0x8814151C),
+        shape = CircleShape,
+        modifier = Modifier
+            .defaultMinSize(minWidth = 38.dp, minHeight = 38.dp)
+            .clickable { onClick() }
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp)
+        ) {
+            Text(label, color = White, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
+        }
+    }
+}
+
+@Composable
+fun PlayerTopIcon(label: String, onClick: () -> Unit) {
+    Surface(
+        color = Color(0x6614151C),
+        shape = RoundedCornerShape(7.dp),
+        modifier = Modifier.clickable { onClick() }
+    ) {
+        Text(
+            label,
+            color = White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.ExtraBold,
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
+        )
+    }
+}
+
+@Composable
+fun PlayerBottomIcon(symbol: String, enabled: Boolean = true, onClick: () -> Unit) {
+    Text(
+        symbol,
+        color = if (enabled) White else Color(0x55FFFFFF),
+        fontSize = 21.sp,
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier
+            .clickable(enabled = enabled) { onClick() }
+            .padding(6.dp)
+    )
+}
+
+@Composable
+fun PlayerIconChip(symbol: String, onClick: () -> Unit) {
+    Surface(
+        color = Color(0x8814151C),
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier.clickable { onClick() }
+    ) {
+        Text(
+            symbol,
+            color = White,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+        )
     }
 }
 
@@ -2059,7 +2542,7 @@ fun DownloadsScreen(onPlay: (DownloadInfo) -> Unit) {
                 Spacer(Modifier.height(8.dp))
                 Text("Abhi koi download nahi hai", color = White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(4.dp))
-                Text("Kisi bhi episode ke player mein जाकर 'Download Episode' dabayein.", color = Gray, fontSize = 12.sp)
+                Text("Kisi bhi episode ke player mein top bar par '↓' dabayein.", color = Gray, fontSize = 12.sp)
             }
         }
 
@@ -2173,145 +2656,29 @@ fun DownloadsScreen(onPlay: (DownloadInfo) -> Unit) {
 
 @Composable
 fun LocalDownloadedPlayer(download: DownloadInfo, onBack: () -> Unit) {
-    val context = LocalContext.current
-    val activity = context as? Activity
-    var fullscreen by remember { mutableStateOf(false) }
-    var seekOverlay by remember { mutableStateOf<String?>(null) }
+    var fullscreen by remember { mutableStateOf(true) }
+    BackHandler { onBack() }
 
-    LaunchedEffect(seekOverlay) {
-        if (seekOverlay != null) {
-            delay(750)
-            seekOverlay = null
-        }
-    }
-
-    val player = remember(download.id) {
-        ExoPlayer.Builder(context).build().apply {
-            setMediaItem(MediaItem.fromUri(Uri.parse(download.localUri)))
-            prepare()
-            playWhenReady = true
-        }
-    }
-
-    fun seekByMillis(deltaMs: Long) {
-        val target = (player.currentPosition + deltaMs).coerceAtLeast(0L)
-        val dur = player.duration
-        player.seekTo(if (dur > 0) target.coerceAtMost(dur) else target)
-        seekOverlay = if (deltaMs < 0) "⏪  -10 Seconds" else "+10 Seconds  ⏩"
-    }
-
-    BackHandler(enabled = fullscreen) { fullscreen = false }
-    DisposableEffect(player) { onDispose { player.release() } }
-    DisposableEffect(fullscreen) {
-        val window = activity?.window
-        val oldOrientation = activity?.requestedOrientation
-        if (fullscreen) {
-            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-            window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            window?.let {
-                WindowCompat.setDecorFitsSystemWindows(it, false)
-                WindowInsetsControllerCompat(it, it.decorView).hide(WindowInsetsCompat.Type.systemBars())
-            }
-        } else {
-            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-            window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            window?.let {
-                WindowCompat.setDecorFitsSystemWindows(it, true)
-                WindowInsetsControllerCompat(it, it.decorView).show(WindowInsetsCompat.Type.systemBars())
-            }
-        }
-        onDispose {
-            activity?.requestedOrientation = oldOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-            window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            window?.let {
-                WindowCompat.setDecorFitsSystemWindows(it, true)
-                WindowInsetsControllerCompat(it, it.decorView).show(WindowInsetsCompat.Type.systemBars())
-            }
-        }
-    }
-    Column(Modifier.fillMaxSize().background(Color.Black)) {
-        if (!fullscreen) {
-            Row(Modifier.fillMaxWidth().background(SurfaceDark).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("‹", color = White, fontSize = 27.sp, modifier = Modifier.clickable { onBack() })
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("OFFLINE PLAYER", color = AccentRed, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                    Text(download.title, color = White, fontSize = 11.sp, maxLines = 1)
-                }
-                SmallOutlineButton("⛶", onClick = { fullscreen = true })
-            }
-        }
-        Box(Modifier.fillMaxWidth().weight(1f).background(Color.Black)) {
-            AndroidView(
-                factory = { ctx ->
-                    PlayerView(ctx).apply {
-                        setPlayer(player)
-                        useController = true
-                        setControllerShowTimeoutMs(3500)
-                        setControllerHideOnTouch(true)
-                        setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
-                        val detector = GestureDetector(ctx, object : GestureDetector.SimpleOnGestureListener() {
-                            override fun onDown(e: MotionEvent): Boolean = true
-                            override fun onDoubleTap(e: MotionEvent): Boolean {
-                                val isLeft = e.x < (width / 2f)
-                                seekByMillis(if (isLeft) -10_000L else 10_000L)
-                                return true
-                            }
-                        })
-                        setOnTouchListener { _, event ->
-                            detector.onTouchEvent(event)
-                            false
-                        }
-                    }
-                },
-                update = { it.setPlayer(player); it.useController = true },
-                modifier = Modifier.fillMaxSize()
-            )
-
-            seekOverlay?.let { label ->
-                Surface(
-                    color = Color(0xCC14151C),
-                    shape = RoundedCornerShape(20.dp),
-                    modifier = Modifier.align(Alignment.Center)
-                ) {
-                    Text(
-                        label,
-                        color = White,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp)
-                    )
-                }
-            }
-
-            if (fullscreen) {
-                Row(
-                    Modifier.align(Alignment.TopEnd).padding(12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    SmallOutlineButton("⏪ -10s", onClick = { seekByMillis(-10_000L) })
-                    SmallOutlineButton("+10s ⏩", onClick = { seekByMillis(10_000L) })
-                    SmallOutlineButton("✕", onClick = { fullscreen = false })
-                }
-            }
-        }
-        if (!fullscreen) {
-            Row(
-                Modifier.fillMaxWidth().background(SurfaceDark).padding(horizontal = 14.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                SmallOutlineButton("⏪  -10s", onClick = { seekByMillis(-10_000L) })
-                Text(
-                    "✓ Offline • Double-tap to skip 10s",
-                    color = Color(0xFF4CAF50),
-                    fontSize = 11.sp,
-                    modifier = Modifier.weight(1f)
-                )
-                SmallOutlineButton("+10s  ⏩", onClick = { seekByMillis(10_000L) })
-            }
-        }
-    }
+    WatchPlayer(
+        videoUrl = download.localUri,
+        episodeId = "offline_${download.id}",
+        episodeTitle = download.title,
+        fullscreen = fullscreen,
+        hasPrevious = false,
+        hasNext = false,
+        currentLanguage = "Offline",
+        availableLanguages = listOf("Offline"),
+        currentQuality = "Local",
+        availableQualities = listOf("Local"),
+        canDownload = false,
+        onSelectLanguage = {},
+        onSelectQuality = {},
+        onDownloadClick = {},
+        onPreviousEpisode = {},
+        onNextEpisode = {},
+        onToggleFullscreen = { fullscreen = !fullscreen },
+        onBack = onBack
+    )
 }
 
 @Composable
