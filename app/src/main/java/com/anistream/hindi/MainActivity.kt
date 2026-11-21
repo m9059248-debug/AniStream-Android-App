@@ -421,6 +421,7 @@ private suspend fun fetchCommentsForAnime(animeId: String): List<AnimeComment> =
     (0 until arr.length()).mapNotNull { i ->
         val obj = arr.getJSONObject(i)
         val rawContent = obj.optString("content").takeUnless { it == "null" }.orEmpty()
+            .ifBlank { obj.optString("comment_text").takeUnless { it == "null" }.orEmpty() }
             .ifBlank { obj.optString("comment").takeUnless { it == "null" }.orEmpty() }
         if (rawContent.isBlank()) return@mapNotNull null
 
@@ -428,7 +429,6 @@ private suspend fun fetchCommentsForAnime(animeId: String): List<AnimeComment> =
         val explicitName = obj.optString("user_name").takeUnless { it == "null" }.orEmpty()
             .ifBlank { obj.optString("username").takeUnless { it == "null" }.orEmpty() }
 
-        // If user name was embedded as "[Name] message", extract it cleanly
         val (parsedName, cleanContent) = if (explicitName.isBlank() && rawContent.startsWith("[") && rawContent.contains("] ")) {
             val endBracket = rawContent.indexOf("] ")
             val extractedName = rawContent.substring(1, endBracket).trim()
@@ -464,7 +464,6 @@ private suspend fun postAnimeComment(
     val displayName = session.fullName.ifBlank { session.email.substringBefore("@") }.ifBlank { "Member" }
     val taggedContent = "[$displayName] ${commentText.trim()}"
 
-    // Primary insert using standard columns (anime_id, user_id, content)
     val primaryPayload = JSONObject().apply {
         put("anime_id", animeId)
         put("user_id", session.userId)
@@ -483,11 +482,10 @@ private suspend fun postAnimeComment(
     }
 
     if (primaryAttempt.isFailure) {
-        // Fallback if table uses 'comment' column instead of 'content'
         val fallbackPayload = JSONObject().apply {
             put("anime_id", animeId)
             put("user_id", session.userId)
-            put("comment", taggedContent)
+            put("comment_text", taggedContent)
         }
         request(
             "$SUPABASE_URL/rest/v1/comments",
@@ -954,7 +952,6 @@ fun AniStreamApp() {
                         onBack = { selectedAnime = null }
                     )
                     else -> {
-                        // Clean Text Header Bar (No In-App Logo)
                         Row(
                             Modifier
                                 .fillMaxWidth()
@@ -964,51 +961,54 @@ fun AniStreamApp() {
                             Text("Ani", color = White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
                             Text("Stream", color = AccentRed, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
                             Spacer(Modifier.width(6.dp))
-                            Surface(color = SurfaceDark, shape = RoundedCornerShape(5.dp)) {
+                            Box(
+                                Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(SurfaceDark)
+                                    .padding(horizontal = 5.dp, vertical = 2.dp)
+                            ) {
                                 Text(
                                     "HINDI",
                                     color = AccentRed,
                                     fontSize = 8.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                    lineHeight = 9.sp,
+                                    fontWeight = FontWeight.ExtraBold
                                 )
                             }
                             Spacer(Modifier.weight(1f))
-                            // Quick Search Icon
                             Box(
                                 Modifier
-                                    .size(32.dp)
-                                    .clip(RoundedCornerShape(9.dp))
+                                    .size(30.dp)
+                                    .clip(RoundedCornerShape(8.dp))
                                     .background(SurfaceDark)
                                     .clickable { tab = 1 },
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text("⌕", color = White, fontSize = 16.sp)
+                                Text("⌕", color = White, fontSize = 15.sp)
                             }
                             Spacer(Modifier.width(8.dp))
-                            // Compact Profile Avatar Icon
                             if (!userSession?.avatarUrl.isNullOrBlank()) {
                                 UserAvatarView(
                                     avatarUrl = userSession?.avatarUrl.orEmpty(),
                                     fallbackInitial = badgeLetter,
-                                    size = 32.dp,
-                                    fontSize = 14.sp,
+                                    size = 30.dp,
+                                    fontSize = 13.sp,
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(9.dp))
-                                        .border(1.dp, AccentRed, RoundedCornerShape(9.dp))
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .border(1.dp, AccentRed, RoundedCornerShape(8.dp))
                                         .clickable { tab = 4 }
                                 )
                             } else {
                                 Box(
                                     Modifier
-                                        .size(32.dp)
-                                        .clip(RoundedCornerShape(9.dp))
+                                        .size(30.dp)
+                                        .clip(RoundedCornerShape(8.dp))
                                         .background(SurfaceDark)
-                                        .border(1.dp, Color(0xFF2B2D3C), RoundedCornerShape(9.dp))
+                                        .border(1.dp, Color(0xFF2B2D3C), RoundedCornerShape(8.dp))
                                         .clickable { tab = 4 },
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Text(badgeLetter.toString(), color = AccentRed, fontSize = 14.sp, fontWeight = FontWeight.Black)
+                                    Text(badgeLetter.toString(), color = AccentRed, fontSize = 13.sp, fontWeight = FontWeight.Black)
                                 }
                             }
                         }
@@ -1063,7 +1063,7 @@ fun AniStreamApp() {
     }
 }
 
-/* REUSABLE COMMENTS & ADMIN REPLY SECTION */
+/* REUSABLE COMPACT COMMENTS & ADMIN REPLY SECTION */
 @Composable
 fun CommentsSection(
     animeId: String,
@@ -1096,9 +1096,9 @@ fun CommentsSection(
         Column(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(10.dp))
                 .background(SurfaceDark)
-                .padding(12.dp)
+                .padding(10.dp)
         ) {
             if (userSession == null) {
                 Row(
@@ -1133,7 +1133,7 @@ fun CommentsSection(
                         cursorColor = AccentRed
                     )
                 )
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(7.dp))
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -1144,40 +1144,43 @@ fun CommentsSection(
                         onClick = { loadComments() },
                         enabled = !loading && !posting
                     )
-                    Button(
-                        onClick = {
-                            val clean = commentInput.trim()
-                            if (clean.length < 2) {
-                                isError = true
-                                statusMsg = "Kripya comment likhein."
-                                return@Button
-                            }
-                            posting = true
-                            statusMsg = null
-                            scope.launch {
-                                try {
-                                    postAnimeComment(animeId, clean, userSession)
-                                    commentInput = ""
-                                    isError = false
-                                    statusMsg = "Comment post ho gaya!"
-                                    loadComments()
-                                } catch (e: Exception) {
+                    // Compact Sleek "Post Comment" Pill Button
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (posting) Color(0xFF7A1529) else AccentRed)
+                            .clickable(enabled = !posting) {
+                                val clean = commentInput.trim()
+                                if (clean.length < 2) {
                                     isError = true
-                                    statusMsg = e.message ?: "Comment post nahi ho paya."
-                                } finally {
-                                    posting = false
+                                    statusMsg = "Kripya comment likhein."
+                                    return@clickable
+                                }
+                                posting = true
+                                statusMsg = null
+                                scope.launch {
+                                    try {
+                                        postAnimeComment(animeId, clean, userSession)
+                                        commentInput = ""
+                                        isError = false
+                                        statusMsg = "Comment post ho gaya!"
+                                        loadComments()
+                                    } catch (e: Exception) {
+                                        isError = true
+                                        statusMsg = e.message ?: "Comment post nahi ho paya."
+                                    } finally {
+                                        posting = false
+                                    }
                                 }
                             }
-                        },
-                        enabled = !posting,
-                        modifier = Modifier.height(32.dp),
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
-                        shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = AccentRed, contentColor = White)
+                            .padding(horizontal = 10.dp, vertical = 5.dp),
+                        contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            if (posting) "Posting..." else "Post Comment",
-                            fontSize = 10.sp,
+                            text = if (posting) "Posting..." else "Post Comment",
+                            color = White,
+                            fontSize = 9.sp,
+                            lineHeight = 11.sp,
                             fontWeight = FontWeight.ExtraBold
                         )
                     }
@@ -1185,7 +1188,7 @@ fun CommentsSection(
             }
 
             statusMsg?.let { msg ->
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(5.dp))
                 Text(
                     msg,
                     color = if (isError) AccentRed else Color(0xFF4CAF50),
@@ -1194,28 +1197,28 @@ fun CommentsSection(
             }
         }
 
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(8.dp))
 
         when {
             loading -> Box(
                 Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 16.dp),
+                    .padding(vertical = 14.dp),
                 contentAlignment = Alignment.Center
             ) {
-                CircularProgressIndicator(color = AccentRed, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                CircularProgressIndicator(color = AccentRed, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
             }
             comments.isEmpty() -> Box(
                 Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(11.dp))
+                    .clip(RoundedCornerShape(10.dp))
                     .background(SurfaceDark)
-                    .padding(16.dp),
+                    .padding(14.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text("Abhi koi comment nahi hai. Pehla comment aap karein!", color = Gray, fontSize = 11.sp)
             }
-            else -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            else -> Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
                 comments.forEach { item ->
                     val initial = (item.userName.firstOrNull() ?: 'U').uppercaseChar()
                     val isOwnComment = userSession != null && item.userId == userSession.userId
@@ -1223,25 +1226,31 @@ fun CommentsSection(
                     Column(
                         Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(11.dp))
+                            .clip(RoundedCornerShape(10.dp))
                             .background(SurfaceDark)
-                            .padding(11.dp)
+                            .padding(10.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(
                                 Modifier
-                                    .size(26.dp)
+                                    .size(22.dp)
                                     .clip(CircleShape)
                                     .background(Color(0xFF28151E)),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text(initial.toString(), color = AccentRed, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
+                                Text(
+                                    initial.toString(),
+                                    color = AccentRed,
+                                    fontSize = 10.sp,
+                                    lineHeight = 11.sp,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
                             }
-                            Spacer(Modifier.width(8.dp))
+                            Spacer(Modifier.width(7.dp))
                             Column(Modifier.weight(1f)) {
-                                Text(item.userName, color = White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text(item.userName, color = White, fontSize = 11.sp, lineHeight = 13.sp, fontWeight = FontWeight.Bold)
                                 if (item.createdAt.isNotBlank()) {
-                                    Text(item.createdAt, color = Gray, fontSize = 9.sp)
+                                    Text(item.createdAt, color = Gray, fontSize = 8.sp, lineHeight = 10.sp)
                                 }
                             }
                             if (isOwnComment) {
@@ -1249,6 +1258,7 @@ fun CommentsSection(
                                     "🗑 Delete",
                                     color = AccentRed,
                                     fontSize = 9.sp,
+                                    lineHeight = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier
                                         .clickable {
@@ -1257,40 +1267,52 @@ fun CommentsSection(
                                                 loadComments()
                                             }
                                         }
-                                        .padding(horizontal = 6.dp, vertical = 3.dp)
+                                        .padding(horizontal = 5.dp, vertical = 2.dp)
                                 )
                             }
                         }
 
-                        Spacer(Modifier.height(6.dp))
-                        Text(item.content, color = Color(0xFFE2E4EC), fontSize = 11.sp)
+                        Spacer(Modifier.height(5.dp))
+                        Text(item.content, color = Color(0xFFE2E4EC), fontSize = 11.sp, lineHeight = 14.sp)
 
-                        // Admin Reply Box (From Admin Panel)
+                        // Ultra-Compact Admin Reply Box & Badge
                         if (item.adminReply.isNotBlank()) {
-                            Spacer(Modifier.height(8.dp))
+                            Spacer(Modifier.height(6.dp))
                             Column(
                                 Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
+                                    .clip(RoundedCornerShape(7.dp))
                                     .background(Color(0xFF1A1218))
-                                    .border(1.dp, Color(0xFF421824), RoundedCornerShape(8.dp))
-                                    .padding(9.dp)
+                                    .border(1.dp, Color(0xFF3A1621), RoundedCornerShape(7.dp))
+                                    .padding(horizontal = 8.dp, vertical = 6.dp)
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Surface(color = AccentRed, shape = RoundedCornerShape(4.dp)) {
+                                    Box(
+                                        Modifier
+                                            .clip(RoundedCornerShape(3.dp))
+                                            .background(AccentRed)
+                                            .padding(horizontal = 4.dp, vertical = 1.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
                                         Text(
-                                            "ADMIN REPLY",
+                                            text = "ADMIN REPLY",
                                             color = White,
-                                            fontSize = 7.sp,
-                                            fontWeight = FontWeight.ExtraBold,
-                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                            fontSize = 6.5.sp,
+                                            lineHeight = 8.sp,
+                                            fontWeight = FontWeight.ExtraBold
                                         )
                                     }
-                                    Spacer(Modifier.width(6.dp))
-                                    Text("AniStream Official", color = Gray, fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
+                                    Spacer(Modifier.width(5.dp))
+                                    Text(
+                                        text = "AniStream Official",
+                                        color = Gray,
+                                        fontSize = 8.5.sp,
+                                        lineHeight = 10.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
                                 }
-                                Spacer(Modifier.height(4.dp))
-                                Text(item.adminReply, color = White, fontSize = 11.sp)
+                                Spacer(Modifier.height(3.dp))
+                                Text(item.adminReply, color = White, fontSize = 10.5.sp, lineHeight = 13.sp)
                             }
                         }
                     }
@@ -1367,19 +1389,18 @@ fun HomeScreen(
                     fontWeight = FontWeight.ExtraBold
                 )
             }
-            Surface(
-                color = SurfaceDark,
-                shape = RoundedCornerShape(18.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF282A38)),
-                modifier = Modifier.clickable { onExploreClick() }
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(SurfaceDark)
+                    .border(1.dp, Color(0xFF282A38), RoundedCornerShape(14.dp))
+                    .clickable { onExploreClick() }
+                    .padding(horizontal = 9.dp, vertical = 4.dp)
             ) {
-                Row(
-                    Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("🧭", fontSize = 11.sp)
-                    Spacer(Modifier.width(5.dp))
-                    Text("Explore", color = White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("🧭", fontSize = 10.sp)
+                    Spacer(Modifier.width(4.dp))
+                    Text("Explore", color = White, fontSize = 10.sp, lineHeight = 11.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
@@ -1391,25 +1412,28 @@ fun HomeScreen(
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 2.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(7.dp)
         ) {
             categories.forEach { (key, label) ->
                 val isSelected = selectedCategory == key
-                Surface(
-                    color = if (isSelected) Color(0xFF29151E) else SurfaceDark,
-                    shape = RoundedCornerShape(18.dp),
-                    border = androidx.compose.foundation.BorderStroke(
-                        1.dp,
-                        if (isSelected) AccentRed else Color(0xFF252736)
-                    ),
-                    modifier = Modifier.clickable { selectedCategory = key }
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(if (isSelected) Color(0xFF29151E) else SurfaceDark)
+                        .border(
+                            1.dp,
+                            if (isSelected) AccentRed else Color(0xFF252736),
+                            RoundedCornerShape(14.dp)
+                        )
+                        .clickable { selectedCategory = key }
+                        .padding(horizontal = 10.dp, vertical = 4.5.dp)
                 ) {
                     Text(
                         text = label,
                         color = if (isSelected) White else Color(0xFFD0D2DC),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                        fontSize = 10.sp,
+                        lineHeight = 11.sp,
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
             }
@@ -1451,7 +1475,7 @@ fun HomeScreen(
                     Modifier
                         .fillMaxWidth()
                         .padding(start = 16.dp)
-                        .height(335.dp)
+                        .height(330.dp)
                         .pointerInput(featuredSlides.size, safeIndex) {
                             detectHorizontalDragGestures(
                                 onDragStart = { dragDelta = 0f },
@@ -1502,19 +1526,20 @@ fun HomeScreen(
                                 )
                         )
 
-                        Surface(
-                            color = AccentRed,
-                            shape = RoundedCornerShape(7.dp),
-                            modifier = Modifier
+                        Box(
+                            Modifier
                                 .align(Alignment.TopStart)
                                 .padding(12.dp)
+                                .clip(RoundedCornerShape(5.dp))
+                                .background(AccentRed)
+                                .padding(horizontal = 7.dp, vertical = 3.dp)
                         ) {
                             Text(
                                 "✦ FEATURED",
                                 color = White,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                fontSize = 8.sp,
+                                lineHeight = 9.sp,
+                                fontWeight = FontWeight.ExtraBold
                             )
                         }
 
@@ -1522,7 +1547,7 @@ fun HomeScreen(
                             Modifier
                                 .align(Alignment.TopEnd)
                                 .padding(12.dp)
-                                .size(28.dp)
+                                .size(26.dp)
                                 .clip(CircleShape)
                                 .background(if (isFeaturedSaved) AccentRed else Color(0xAA14151C))
                                 .clickable { onToggleMyList(featured) },
@@ -1531,7 +1556,7 @@ fun HomeScreen(
                             Text(
                                 if (isFeaturedSaved) "♥" else "♡",
                                 color = White,
-                                fontSize = 13.sp,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -1543,65 +1568,76 @@ fun HomeScreen(
                                 .padding(14.dp)
                         ) {
                             Row(
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(5.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Surface(color = AccentRed, shape = RoundedCornerShape(5.dp)) {
+                                Box(
+                                    Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(AccentRed)
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
                                     Text(
                                         "★ HINDI",
                                         color = White,
-                                        fontSize = 8.sp,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                                        fontSize = 7.5.sp,
+                                        lineHeight = 9.sp,
+                                        fontWeight = FontWeight.ExtraBold
                                     )
                                 }
-                                Surface(color = Color(0xFF252734), shape = RoundedCornerShape(5.dp)) {
+                                Box(
+                                    Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(Color(0xFF252734))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
                                     Text(
                                         if (featured.animeType.equals("Movie", true)) "MOVIE" else "TV",
                                         color = White,
-                                        fontSize = 8.sp,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                                        fontSize = 7.5.sp,
+                                        lineHeight = 9.sp,
+                                        fontWeight = FontWeight.ExtraBold
                                     )
                                 }
                             }
 
-                            Spacer(Modifier.height(7.dp))
+                            Spacer(Modifier.height(6.dp))
                             Text(
                                 featured.title,
                                 color = White,
-                                fontSize = 20.sp,
+                                fontSize = 19.sp,
                                 fontWeight = FontWeight.ExtraBold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
-                            Spacer(Modifier.height(3.dp))
+                            Spacer(Modifier.height(2.dp))
                             Text(
                                 featured.description
                                     .ifBlank { "Stream in Hindi on AniStream." }
                                     .replace(Regex("\\<[^\\>]*\\>"), ""),
                                 color = Gray,
-                                fontSize = 11.sp,
+                                fontSize = 10.5.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
-                            Spacer(Modifier.height(10.dp))
+                            Spacer(Modifier.height(9.dp))
 
-                            Surface(
-                                color = AccentRed,
-                                shape = RoundedCornerShape(9.dp),
-                                modifier = Modifier
+                            Box(
+                                Modifier
                                     .fillMaxWidth()
-                                    .height(34.dp)
-                                    .clickable { onAnimeClick(featured) }
+                                    .height(30.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(AccentRed)
+                                    .clickable { onAnimeClick(featured) },
+                                contentAlignment = Alignment.Center
                             ) {
-                                Row(
-                                    Modifier.fillMaxSize(),
-                                    horizontalArrangement = Arrangement.Center,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text("▶  Watch Now", color = White, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
-                                }
+                                Text(
+                                    "▶  Watch Now",
+                                    color = White,
+                                    fontSize = 11.sp,
+                                    lineHeight = 12.sp,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
                             }
                         }
                     }
@@ -1634,7 +1670,7 @@ fun HomeScreen(
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .padding(top = 11.dp, bottom = 6.dp),
+                            .padding(top = 10.dp, bottom = 5.dp),
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -1643,8 +1679,8 @@ fun HomeScreen(
                             Box(
                                 Modifier
                                     .padding(horizontal = 3.dp)
-                                    .height(5.dp)
-                                    .width(if (active) 18.dp else 5.dp)
+                                    .height(4.5.dp)
+                                    .width(if (active) 16.dp else 4.5.dp)
                                     .clip(CircleShape)
                                     .background(if (active) AccentRed else Color(0xFF343746))
                                     .clickable { currentSlide = idx }
@@ -1653,7 +1689,7 @@ fun HomeScreen(
                     }
                 }
 
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(10.dp))
 
                 if (savedContinueList.isNotEmpty()) {
                     AnimeSection("Saved in Watchlist", savedContinueList, onAnimeClick)
@@ -1689,7 +1725,7 @@ fun AnimeSection(title: String, animeList: List<Anime>, onAnimeClick: (Anime) ->
             Box(
                 Modifier
                     .width(3.dp)
-                    .height(15.dp)
+                    .height(14.dp)
                     .clip(RoundedCornerShape(2.dp))
                     .background(AccentRed)
             )
@@ -1713,41 +1749,42 @@ fun AnimeSection(title: String, animeList: List<Anime>, onAnimeClick: (Anime) ->
 
 @Composable
 fun AnimeCard(anime: Anime, onClick: () -> Unit) {
-    Column(Modifier.width(114.dp).clickable { onClick() }) {
+    Column(Modifier.width(110.dp).clickable { onClick() }) {
         Box(
             Modifier
                 .fillMaxWidth()
-                .height(154.dp)
-                .clip(RoundedCornerShape(11.dp))
+                .height(148.dp)
+                .clip(RoundedCornerShape(10.dp))
                 .background(SurfaceDark)
         ) {
             AsyncImage(anime.posterUrl, anime.title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             if (anime.animeType.equals("Movie", true)) {
-                Surface(
+                Box(
                     Modifier
                         .align(Alignment.TopStart)
-                        .padding(6.dp),
-                    color = AccentRed,
-                    shape = RoundedCornerShape(4.dp)
+                        .padding(5.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(AccentRed)
+                        .padding(horizontal = 4.dp, vertical = 1.5.dp)
                 ) {
                     Text(
                         "MOVIE",
                         color = White,
-                        fontSize = 7.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                        fontSize = 6.5.sp,
+                        lineHeight = 8.sp,
+                        fontWeight = FontWeight.ExtraBold
                     )
                 }
             }
         }
-        Spacer(Modifier.height(5.dp))
+        Spacer(Modifier.height(4.dp))
         Text(
             anime.title,
             color = White,
-            fontSize = 11.sp,
+            fontSize = 10.5.sp,
+            lineHeight = 13.sp,
             fontWeight = FontWeight.Bold,
             maxLines = 2,
-            minLines = 2,
             overflow = TextOverflow.Ellipsis
         )
     }
@@ -1809,7 +1846,7 @@ fun MyListScreen(
                     .padding(20.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text("♡", color = AccentRed, fontSize = 32.sp, fontWeight = FontWeight.Bold)
+                Text("♡", color = AccentRed, fontSize = 30.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(6.dp))
                 Text("Your My List is Empty", color = White, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
                 Spacer(Modifier.height(4.dp))
@@ -1818,15 +1855,15 @@ fun MyListScreen(
                     color = Gray,
                     fontSize = 11.sp
                 )
-                Spacer(Modifier.height(14.dp))
-                Button(
-                    onClick = onExploreClick,
-                    modifier = Modifier.height(34.dp),
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = AccentRed, contentColor = White)
+                Spacer(Modifier.height(12.dp))
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(7.dp))
+                        .background(AccentRed)
+                        .clickable { onExploreClick() }
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
                 ) {
-                    Text("EXPLORE ANIME", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("EXPLORE ANIME", color = White, fontSize = 9.5.sp, lineHeight = 11.sp, fontWeight = FontWeight.ExtraBold)
                 }
             }
         } else {
@@ -1845,36 +1882,38 @@ fun MyListScreen(
                             anime.posterUrl,
                             anime.title,
                             Modifier
-                                .size(70.dp, 96.dp)
+                                .size(66.dp, 90.dp)
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(Background),
                             contentScale = ContentScale.Crop
                         )
-                        Spacer(Modifier.width(12.dp))
+                        Spacer(Modifier.width(11.dp))
                         Column(Modifier.weight(1f)) {
-                            Surface(
-                                color = if (anime.animeType.equals("Movie", true)) AccentRed else Color(0xFF282A36),
-                                shape = RoundedCornerShape(4.dp)
+                            Box(
+                                Modifier
+                                    .clip(RoundedCornerShape(3.dp))
+                                    .background(if (anime.animeType.equals("Movie", true)) AccentRed else Color(0xFF282A36))
+                                    .padding(horizontal = 5.dp, vertical = 1.5.dp)
                             ) {
                                 Text(
                                     anime.animeType.ifBlank { "Series" }.uppercase(),
                                     color = White,
-                                    fontSize = 7.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    fontSize = 6.5.sp,
+                                    lineHeight = 8.sp,
+                                    fontWeight = FontWeight.ExtraBold
                                 )
                             }
-                            Spacer(Modifier.height(5.dp))
-                            Text(anime.title, color = White, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
-                            Spacer(Modifier.height(3.dp))
+                            Spacer(Modifier.height(4.dp))
+                            Text(anime.title, color = White, fontSize = 13.5.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+                            Spacer(Modifier.height(2.dp))
                             Text(
                                 anime.description.ifBlank { "Watch on AniStream Hindi" }.replace(Regex("\\<[^\\>]*\\>"), ""),
                                 color = Gray,
                                 fontSize = 10.sp,
                                 maxLines = 2
                             )
-                            Spacer(Modifier.height(8.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Spacer(Modifier.height(7.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                                 SmallOutlineButton(
                                     text = "▶ Watch",
                                     onClick = { onAnimeClick(anime) },
@@ -1975,37 +2014,39 @@ fun ProfileScreen(
                     .border(1.dp, Color(0xFF2D2F3E), RoundedCornerShape(16.dp))
                     .padding(16.dp)
             ) {
-                Text("Change Profile Photo", color = White, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
-                Spacer(Modifier.height(4.dp))
-                Text("Gallery se apni photo chunein ya Anime Avatar select karein:", color = Gray, fontSize = 11.sp)
+                Text("Change Profile Photo", color = White, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+                Spacer(Modifier.height(3.dp))
+                Text("Gallery se apni photo chunein ya Anime Avatar select karein:", color = Gray, fontSize = 10.5.sp)
 
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(10.dp))
 
-                Button(
-                    onClick = { galleryLauncher.launch("image/*") },
-                    modifier = Modifier.fillMaxWidth().height(36.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = AccentRed, contentColor = White)
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(32.dp)
+                        .clip(RoundedCornerShape(7.dp))
+                        .background(AccentRed)
+                        .clickable { galleryLauncher.launch("image/*") },
+                    contentAlignment = Alignment.Center
                 ) {
-                    Text("📷  CHOOSE FROM GALLERY", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("📷  CHOOSE FROM GALLERY", color = White, fontSize = 10.sp, lineHeight = 11.sp, fontWeight = FontWeight.ExtraBold)
                 }
 
-                Spacer(Modifier.height(12.dp))
-                Text("OR PICK ANIME AVATAR", color = Gray, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold)
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(10.dp))
+                Text("OR PICK ANIME AVATAR", color = Gray, fontSize = 8.5.sp, fontWeight = FontWeight.ExtraBold)
+                Spacer(Modifier.height(7.dp))
 
                 Row(
                     Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(9.dp)
                 ) {
                     PRESET_ANIME_AVATARS.forEach { presetUrl ->
                         val isSelected = session.avatarUrl == presetUrl
                         Box(
                             Modifier
-                                .size(50.dp)
+                                .size(46.dp)
                                 .clip(CircleShape)
                                 .background(Background)
                                 .border(
@@ -2025,13 +2066,13 @@ fun ProfileScreen(
                     }
                 }
 
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(10.dp))
                 OutlinedTextField(
                     value = customAvatarUrlInput,
                     onValueChange = { customAvatarUrlInput = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Or Paste Image URL", color = Gray, fontSize = 11.sp) },
-                    placeholder = { Text("https://...", color = Gray, fontSize = 11.sp) },
+                    label = { Text("Or Paste Image URL", color = Gray, fontSize = 10.5.sp) },
+                    placeholder = { Text("https://...", color = Gray, fontSize = 10.5.sp) },
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = White,
@@ -2043,7 +2084,7 @@ fun ProfileScreen(
                 )
 
                 Spacer(Modifier.height(10.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(7.dp), modifier = Modifier.fillMaxWidth()) {
                     if (customAvatarUrlInput.trim().startsWith("http")) {
                         SmallOutlineButton(
                             text = "Save URL",
@@ -2079,7 +2120,7 @@ fun ProfileScreen(
             Text(
                 if (isSignUp) "Create Account" else "Welcome Back",
                 color = White,
-                fontSize = 21.sp,
+                fontSize = 20.sp,
                 fontWeight = FontWeight.ExtraBold
             )
             Text(
@@ -2088,49 +2129,49 @@ fun ProfileScreen(
                 color = Gray,
                 fontSize = 11.sp
             )
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(12.dp))
 
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
+                    .clip(RoundedCornerShape(9.dp))
                     .background(SurfaceDark)
                     .padding(3.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Surface(
-                    color = if (!isSignUp) AccentRed else Color.Transparent,
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier
+                Box(
+                    Modifier
                         .weight(1f)
+                        .clip(RoundedCornerShape(7.dp))
+                        .background(if (!isSignUp) AccentRed else Color.Transparent)
                         .clickable {
                             isSignUp = false
                             errorMsg = null
                             infoMsg = null
                         }
+                        .padding(vertical = 7.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Box(Modifier.padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
-                        Text("LOGIN", color = White, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
-                    }
+                    Text("LOGIN", color = White, fontSize = 10.sp, lineHeight = 11.sp, fontWeight = FontWeight.ExtraBold)
                 }
-                Surface(
-                    color = if (isSignUp) AccentRed else Color.Transparent,
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier
+                Box(
+                    Modifier
                         .weight(1f)
+                        .clip(RoundedCornerShape(7.dp))
+                        .background(if (isSignUp) AccentRed else Color.Transparent)
                         .clickable {
                             isSignUp = true
                             errorMsg = null
                             infoMsg = null
                         }
+                        .padding(vertical = 7.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Box(Modifier.padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
-                        Text("SIGN UP", color = White, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
-                    }
+                    Text("SIGN UP", color = White, fontSize = 10.sp, lineHeight = 11.sp, fontWeight = FontWeight.ExtraBold)
                 }
             }
 
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(12.dp))
 
             Column(
                 Modifier
@@ -2186,7 +2227,7 @@ fun ProfileScreen(
                         Text(
                             if (showPassword) "HIDE" else "SHOW",
                             color = AccentRed,
-                            fontSize = 10.sp,
+                            fontSize = 9.5.sp,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier
                                 .clickable { showPassword = !showPassword }
@@ -2222,76 +2263,81 @@ fun ProfileScreen(
                 }
 
                 errorMsg?.let {
-                    Surface(color = Color(0xFF2D1219), shape = RoundedCornerShape(8.dp)) {
-                        Text(
-                            it,
-                            color = AccentRed,
-                            fontSize = 11.sp,
-                            modifier = Modifier.padding(9.dp)
-                        )
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(7.dp))
+                            .background(Color(0xFF2D1219))
+                            .padding(8.dp)
+                    ) {
+                        Text(it, color = AccentRed, fontSize = 10.5.sp)
                     }
                 }
 
                 infoMsg?.let {
-                    Surface(color = Color(0xFF112A1B), shape = RoundedCornerShape(8.dp)) {
-                        Text(
-                            it,
-                            color = Color(0xFF4CAF50),
-                            fontSize = 11.sp,
-                            modifier = Modifier.padding(9.dp)
-                        )
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(7.dp))
+                            .background(Color(0xFF112A1B))
+                            .padding(8.dp)
+                    ) {
+                        Text(it, color = Color(0xFF4CAF50), fontSize = 10.5.sp)
                     }
                 }
 
-                Button(
-                    onClick = {
-                        errorMsg = null
-                        infoMsg = null
-                        val cleanEmail = email.trim()
-                        when {
-                            isSignUp && fullName.trim().length < 2 -> errorMsg = "Kripya apna naam likhein."
-                            !cleanEmail.contains("@") || !cleanEmail.contains(".") -> errorMsg = "Valid email address dalein."
-                            password.length < 6 -> errorMsg = "Password kam se kam 6 characters ka hona chahiye."
-                            isSignUp && password != confirmPassword -> errorMsg = "Password aur Confirm Password match nahi kar rahe."
-                            else -> {
-                                loading = true
-                                scope.launch {
-                                    try {
-                                        if (isSignUp) {
-                                            val (newSession, message) = supabaseSignUp(fullName, cleanEmail, password)
-                                            if (newSession != null) {
-                                                onSessionUpdated(newSession)
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(34.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (loading) Color(0xFF7A1529) else AccentRed)
+                        .clickable(enabled = !loading) {
+                            errorMsg = null
+                            infoMsg = null
+                            val cleanEmail = email.trim()
+                            when {
+                                isSignUp && fullName.trim().length < 2 -> errorMsg = "Kripya apna naam likhein."
+                                !cleanEmail.contains("@") || !cleanEmail.contains(".") -> errorMsg = "Valid email address dalein."
+                                password.length < 6 -> errorMsg = "Password kam se kam 6 characters ka hona chahiye."
+                                isSignUp && password != confirmPassword -> errorMsg = "Password aur Confirm Password match nahi kar rahe."
+                                else -> {
+                                    loading = true
+                                    scope.launch {
+                                        try {
+                                            if (isSignUp) {
+                                                val (newSession, message) = supabaseSignUp(fullName, cleanEmail, password)
+                                                if (newSession != null) {
+                                                    onSessionUpdated(newSession)
+                                                } else {
+                                                    infoMsg = message
+                                                    isSignUp = false
+                                                    password = ""
+                                                    confirmPassword = ""
+                                                }
                                             } else {
-                                                infoMsg = message
-                                                isSignUp = false
-                                                password = ""
-                                                confirmPassword = ""
+                                                val loggedIn = supabaseSignIn(cleanEmail, password)
+                                                onSessionUpdated(loggedIn)
                                             }
-                                        } else {
-                                            val loggedIn = supabaseSignIn(cleanEmail, password)
-                                            onSessionUpdated(loggedIn)
+                                        } catch (e: Exception) {
+                                            errorMsg = e.message ?: "Authentication fail ho gaya."
+                                        } finally {
+                                            loading = false
                                         }
-                                    } catch (e: Exception) {
-                                        errorMsg = e.message ?: "Authentication fail ho gaya."
-                                    } finally {
-                                        loading = false
                                     }
                                 }
                             }
-                        }
-                    },
-                    enabled = !loading,
-                    modifier = Modifier.fillMaxWidth().height(38.dp),
-                    contentPadding = PaddingValues(vertical = 4.dp),
-                    shape = RoundedCornerShape(9.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = AccentRed, contentColor = White)
+                        },
+                    contentAlignment = Alignment.Center
                 ) {
                     if (loading) {
-                        CircularProgressIndicator(Modifier.size(16.dp), color = White, strokeWidth = 2.dp)
+                        CircularProgressIndicator(Modifier.size(15.dp), color = White, strokeWidth = 2.dp)
                     } else {
                         Text(
                             if (isSignUp) "CREATE ACCOUNT" else "LOGIN",
-                            fontSize = 11.sp,
+                            color = White,
+                            fontSize = 10.5.sp,
+                            lineHeight = 12.sp,
                             fontWeight = FontWeight.ExtraBold
                         )
                     }
@@ -2303,9 +2349,9 @@ fun ProfileScreen(
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
+                    .clip(RoundedCornerShape(15.dp))
                     .background(SurfaceDark)
-                    .padding(14.dp)
+                    .padding(13.dp)
             ) {
                 Row(
                     Modifier.fillMaxWidth(),
@@ -2313,54 +2359,59 @@ fun ProfileScreen(
                 ) {
                     Box(
                         Modifier
-                            .size(60.dp)
+                            .size(56.dp)
                             .clickable { showAvatarDialog = true }
                     ) {
                         UserAvatarView(
                             avatarUrl = session.avatarUrl,
                             fallbackInitial = initial,
-                            size = 56.dp,
-                            fontSize = 22.sp,
+                            size = 52.dp,
+                            fontSize = 20.sp,
                             modifier = Modifier
                                 .clip(CircleShape)
                                 .border(1.5.dp, AccentRed, CircleShape)
                         )
                         Box(
                             Modifier
-                                .size(20.dp)
+                                .size(18.dp)
                                 .align(Alignment.BottomEnd)
                                 .clip(CircleShape)
                                 .background(AccentRed)
                                 .border(1.5.dp, SurfaceDark, CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text("✎", color = White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            Text("✎", color = White, fontSize = 8.sp, lineHeight = 9.sp, fontWeight = FontWeight.Bold)
                         }
                     }
 
-                    Spacer(Modifier.width(12.dp))
+                    Spacer(Modifier.width(11.dp))
                     Column(Modifier.weight(1f)) {
-                        Surface(color = Color(0xFF163222), shape = RoundedCornerShape(4.dp)) {
+                        Box(
+                            Modifier
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(Color(0xFF163222))
+                                .padding(horizontal = 6.dp, vertical = 1.5.dp)
+                        ) {
                             Text(
                                 "VERIFIED MEMBER",
                                 color = Color(0xFF4CAF50),
-                                fontSize = 8.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                                fontSize = 7.sp,
+                                lineHeight = 8.5.sp,
+                                fontWeight = FontWeight.ExtraBold
                             )
                         }
-                        Spacer(Modifier.height(4.dp))
+                        Spacer(Modifier.height(3.dp))
                         Text(
                             session.fullName.ifBlank { "AniStream User" },
                             color = White,
-                            fontSize = 18.sp,
+                            fontSize = 17.sp,
                             fontWeight = FontWeight.ExtraBold
                         )
-                        Text(session.email, color = Gray, fontSize = 11.sp)
+                        Text(session.email, color = Gray, fontSize = 10.5.sp)
                     }
                 }
 
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(9.dp))
                 SmallOutlineButton(
                     text = if (session.avatarUrl.isBlank()) "📷 Set Profile Photo" else "📷 Change Profile Photo",
                     onClick = { showAvatarDialog = true },
@@ -2369,17 +2420,17 @@ fun ProfileScreen(
                 )
             }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(10.dp))
 
             Column(
                 Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(14.dp))
                     .background(SurfaceDark)
-                    .padding(14.dp)
+                    .padding(13.dp)
             ) {
-                Text("ACCOUNT DETAILS", color = AccentRed, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
-                Spacer(Modifier.height(8.dp))
+                Text("ACCOUNT DETAILS", color = AccentRed, fontSize = 9.5.sp, fontWeight = FontWeight.ExtraBold)
+                Spacer(Modifier.height(7.dp))
                 InfoLine("Full Name", session.fullName.ifBlank { "Not set" })
                 InfoLine("Email", session.email)
                 InfoLine("User ID", session.userId.ifBlank { "N/A" })
@@ -2388,13 +2439,13 @@ fun ProfileScreen(
                 InfoLine("Saved Downloads", "$downloadsCount Episodes")
             }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(10.dp))
 
             infoMsg?.let {
-                Text(it, color = Color(0xFF4CAF50), fontSize = 11.sp, modifier = Modifier.padding(bottom = 8.dp))
+                Text(it, color = Color(0xFF4CAF50), fontSize = 10.5.sp, modifier = Modifier.padding(bottom = 7.dp))
             }
             errorMsg?.let {
-                Text(it, color = AccentRed, fontSize = 11.sp, modifier = Modifier.padding(bottom = 8.dp))
+                Text(it, color = AccentRed, fontSize = 10.5.sp, modifier = Modifier.padding(bottom = 7.dp))
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -2410,7 +2461,7 @@ fun ProfileScreen(
                 )
             }
 
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(7.dp))
 
             SmallOutlineButton(
                 text = "↻ Sync Profile & Cloud Data",
@@ -2434,26 +2485,29 @@ fun ProfileScreen(
                 enabled = !loading
             )
 
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(9.dp))
 
-            Button(
-                onClick = {
-                    loading = true
-                    scope.launch {
-                        supabaseLogout(session.accessToken)
-                        loading = false
-                        onSessionUpdated(null)
-                    }
-                },
-                enabled = !loading,
-                modifier = Modifier.fillMaxWidth().height(36.dp),
-                contentPadding = PaddingValues(vertical = 4.dp),
-                shape = RoundedCornerShape(8.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = AccentRed, contentColor = White)
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(32.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (loading) Color(0xFF7A1529) else AccentRed)
+                    .clickable(enabled = !loading) {
+                        loading = true
+                        scope.launch {
+                            supabaseLogout(session.accessToken)
+                            loading = false
+                            onSessionUpdated(null)
+                        }
+                    },
+                contentAlignment = Alignment.Center
             ) {
                 Text(
                     if (loading) "LOGGING OUT..." else "LOGOUT",
-                    fontSize = 11.sp,
+                    color = White,
+                    fontSize = 10.5.sp,
+                    lineHeight = 12.sp,
                     fontWeight = FontWeight.ExtraBold
                 )
             }
@@ -2509,7 +2563,7 @@ fun SearchScreen(
             )
         )
         Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically) {
             listOf("All", "Series", "Movies").forEach { type ->
                 SmallOutlineButton(
                     text = type,
@@ -2553,7 +2607,7 @@ fun SearchScreen(
                         AsyncImage(
                             anime.posterUrl,
                             anime.title,
-                            Modifier.size(58.dp, 78.dp).clip(RoundedCornerShape(7.dp)).background(Background),
+                            Modifier.size(56.dp, 76.dp).clip(RoundedCornerShape(7.dp)).background(Background),
                             contentScale = ContentScale.Crop
                         )
                         Spacer(Modifier.width(10.dp))
@@ -2681,18 +2735,18 @@ fun AnimeDetailsScreen(
         Text(
             "‹ Back",
             color = White,
-            fontSize = 14.sp,
+            fontSize = 13.sp,
             fontWeight = FontWeight.Bold,
             modifier = Modifier
                 .clickable { onBack() }
-                .padding(horizontal = 16.dp, vertical = 10.dp)
+                .padding(horizontal = 16.dp, vertical = 9.dp)
         )
         AsyncImage(
             details?.banner?.takeIf { it.isNotBlank() } ?: anime.posterUrl,
             anime.title,
             Modifier
                 .fillMaxWidth()
-                .height(155.dp)
+                .height(150.dp)
                 .padding(horizontal = 16.dp)
                 .clip(RoundedCornerShape(14.dp))
                 .background(SurfaceDark),
@@ -2703,8 +2757,8 @@ fun AnimeDetailsScreen(
                 anime.posterUrl,
                 anime.title,
                 Modifier
-                    .width(98.dp)
-                    .height(136.dp)
+                    .width(94.dp)
+                    .height(130.dp)
                     .clip(RoundedCornerShape(10.dp))
                     .background(SurfaceDark),
                 contentScale = ContentScale.Crop
@@ -2718,11 +2772,11 @@ fun AnimeDetailsScreen(
                     fontWeight = FontWeight.ExtraBold
                 )
                 Text(details?.japaneseTitle.orEmpty(), color = Gray, fontSize = 10.sp)
-                Spacer(Modifier.height(6.dp))
-                Text("⭐ ${details?.rating ?: "Loading..."}", color = AccentRed, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(5.dp))
+                Text("⭐ ${details?.rating ?: "Loading..."}", color = AccentRed, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                 Text("Year: ${details?.year ?: "Loading..."}", color = Gray, fontSize = 10.sp)
                 Text("Episodes: ${details?.episodes ?: "Loading..."}", color = Gray, fontSize = 10.sp)
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(7.dp))
                 SmallOutlineButton(
                     text = if (isInMyList) "♥ In My List" else "♡ Add to My List",
                     onClick = onToggleMyList,
@@ -2730,7 +2784,7 @@ fun AnimeDetailsScreen(
                 )
             }
         }
-        if (detailsLoading) CircularProgressIndicator(Modifier.padding(16.dp).size(22.dp), color = AccentRed)
+        if (detailsLoading) CircularProgressIndicator(Modifier.padding(16.dp).size(20.dp), color = AccentRed)
         else if (detailsError != null) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp),
@@ -2739,9 +2793,9 @@ fun AnimeDetailsScreen(
                 Text("Extra AniList details unavailable.", color = Gray, fontSize = 11.sp, modifier = Modifier.weight(1f))
                 SmallOutlineButton(text = "↻ Retry", onClick = { loadDetails(force = true) })
             }
-            DetailSection("Story") { Text(anime.description.ifBlank { "No description available." }, color = Gray, fontSize = 12.sp) }
+            DetailSection("Story") { Text(anime.description.ifBlank { "No description available." }, color = Gray, fontSize = 11.5.sp) }
         } else details?.let { info ->
-            DetailSection("Story") { Text(info.description.replace(Regex("\\<[^\\>]*\\>"), ""), color = Gray, fontSize = 12.sp) }
+            DetailSection("Story") { Text(info.description.replace(Regex("\\<[^\\>]*\\>"), ""), color = Gray, fontSize = 11.5.sp) }
             DetailSection("Anime Information") {
                 InfoLine("Release", info.year); InfoLine("Status", info.status); InfoLine("Studio", info.studio)
                 InfoLine("Episodes", info.episodes); InfoLine("Rating", info.rating)
@@ -2752,10 +2806,10 @@ fun AnimeDetailsScreen(
             if (info.characters.isNotEmpty()) DetailSection("Characters") {
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     info.characters.forEach { c ->
-                        Column(Modifier.width(84.dp)) {
-                            AsyncImage(c.image, c.name, Modifier.fillMaxWidth().height(106.dp).clip(RoundedCornerShape(8.dp)).background(SurfaceDark), contentScale = ContentScale.Crop)
+                        Column(Modifier.width(80.dp)) {
+                            AsyncImage(c.image, c.name, Modifier.fillMaxWidth().height(100.dp).clip(RoundedCornerShape(8.dp)).background(SurfaceDark), contentScale = ContentScale.Crop)
                             Spacer(Modifier.height(4.dp))
-                            Text(c.name, color = White, fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 2)
+                            Text(c.name, color = White, fontSize = 9.5.sp, lineHeight = 11.sp, fontWeight = FontWeight.Bold, maxLines = 2)
                             Text(c.role, color = Gray, fontSize = 8.sp)
                         }
                     }
@@ -2763,46 +2817,71 @@ fun AnimeDetailsScreen(
             }
         }
         DetailSection("Watch Anime") {
-            Text("Select Season", color = Gray, fontSize = 11.sp)
-            Spacer(Modifier.height(7.dp))
-            if (seasonsLoading) CircularProgressIndicator(Modifier.size(20.dp), color = AccentRed)
+            Text("Select Season", color = Gray, fontSize = 10.sp)
+            Spacer(Modifier.height(5.dp))
+            if (seasonsLoading) CircularProgressIndicator(Modifier.size(18.dp), color = AccentRed)
             else if (seasonsError != null) {
                 Text("Season load error: $seasonsError", color = AccentRed, fontSize = 11.sp)
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(5.dp))
                 SmallOutlineButton(text = "↻ Retry Seasons", onClick = { loadSeasons(force = true) })
             } else if (seasons.isEmpty()) Text("Abhi is Anime ke Seasons add nahi kiye gaye hain.", color = Gray, fontSize = 11.sp)
             else {
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                // Compact Sleek Season Pills
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     seasons.forEach { s ->
                         val selected = selectedSeason?.id == s.id
-                        Surface(
-                            color = if (selected) AccentRed else SurfaceDark,
-                            shape = RoundedCornerShape(7.dp),
-                            modifier = Modifier.clickable { selectedSeason = s }
+                        Box(
+                            Modifier
+                                .clip(RoundedCornerShape(5.dp))
+                                .background(if (selected) AccentRed else SurfaceDark)
+                                .border(
+                                    1.dp,
+                                    if (selected) AccentRed else Color(0xFF282A36),
+                                    RoundedCornerShape(5.dp)
+                                )
+                                .clickable { selectedSeason = s }
+                                .padding(horizontal = 8.dp, vertical = 3.5.dp),
+                            contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                s.title.ifBlank { "Season ${s.seasonNumber}" },
+                                text = s.title.ifBlank { "Season ${s.seasonNumber}" },
                                 color = White,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                fontSize = 9.sp,
+                                lineHeight = 10.5.sp,
+                                fontWeight = FontWeight.Bold
                             )
                         }
                     }
                 }
-                Spacer(Modifier.height(12.dp))
-                Text(selectedSeason?.title ?: "Episodes", color = White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(8.dp))
-                if (episodesLoading) CircularProgressIndicator(Modifier.size(20.dp), color = AccentRed)
+                Spacer(Modifier.height(9.dp))
+                Text(
+                    selectedSeason?.title ?: "Episodes",
+                    color = White,
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(Modifier.height(6.dp))
+                if (episodesLoading) CircularProgressIndicator(Modifier.size(18.dp), color = AccentRed)
                 else if (episodesError != null) Text("Episode load error: $episodesError", color = AccentRed, fontSize = 11.sp)
                 else if (episodes.isEmpty()) Text("Is Season mein abhi koi Published Episode nahi hai.", color = Gray, fontSize = 11.sp)
-                else Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    episodes.forEach { ep -> EpisodeCard(ep, selected = playingEpisode?.id == ep.id) { playingEpisode = ep } }
+                else Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp)
+                ) {
+                    episodes.forEach { ep ->
+                        EpisodeCard(ep, selected = playingEpisode?.id == ep.id) { playingEpisode = ep }
+                    }
                 }
             }
         }
 
-        // Live Comments & Admin Replies Section on Anime Details Page
         CommentsSection(
             animeId = anime.id,
             userSession = userSession,
@@ -2811,29 +2890,42 @@ fun AnimeDetailsScreen(
     }
 }
 
+/* COMPACT & SMALLER EPISODE CARD */
 @Composable
 fun EpisodeCard(episode: AnimeEpisode, selected: Boolean = false, onClick: () -> Unit) {
     Column(
         Modifier
-            .width(102.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .width(82.dp)
+            .clip(RoundedCornerShape(7.dp))
             .background(if (selected) Color(0xFF35101C) else SurfaceDark)
+            .border(
+                width = 1.dp,
+                color = if (selected) AccentRed else Color(0xFF242632),
+                shape = RoundedCornerShape(7.dp)
+            )
             .clickable { onClick() }
-            .padding(9.dp)
+            .padding(horizontal = 7.dp, vertical = 5.5.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("EP ${episode.episodeNumber}", color = AccentRed, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
+            Text(
+                text = "EP ${episode.episodeNumber}",
+                color = AccentRed,
+                fontSize = 9.5.sp,
+                lineHeight = 11.sp,
+                fontWeight = FontWeight.ExtraBold
+            )
             Spacer(Modifier.weight(1f))
-            Text("▶", color = White, fontSize = 11.sp)
+            Text("▶", color = White, fontSize = 8.5.sp, lineHeight = 10.sp)
         }
-        Spacer(Modifier.height(5.dp))
+        Spacer(Modifier.height(3.dp))
         Text(
-            episode.title.ifBlank { "Episode ${episode.episodeNumber}" },
+            text = episode.title.ifBlank { "Episode ${episode.episodeNumber}" },
             color = White,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 2,
-            minLines = 2
+            fontSize = 8.5.sp,
+            lineHeight = 10.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }
@@ -2931,23 +3023,23 @@ fun PlayerScreen(
                 Modifier
                     .fillMaxWidth()
                     .background(SurfaceDark)
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                    .padding(horizontal = 14.dp, vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("‹", color = White, fontSize = 24.sp, modifier = Modifier.clickable { onBack() })
+                Text("‹", color = White, fontSize = 22.sp, modifier = Modifier.clickable { onBack() })
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("ANISTREAM PLAYER", color = AccentRed, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold)
-                    Text("Episode ${episode.episodeNumber}", color = Gray, fontSize = 10.sp)
+                    Text("ANISTREAM PLAYER", color = AccentRed, fontSize = 8.5.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("Episode ${episode.episodeNumber}", color = Gray, fontSize = 9.5.sp)
                 }
                 SmallOutlineButton("⛶", onClick = { fullscreen = true })
             }
             Text(
                 episode.title.ifBlank { "Episode ${episode.episodeNumber}" },
                 color = White,
-                fontSize = 16.sp,
+                fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp)
             )
         }
 
@@ -2995,14 +3087,14 @@ fun PlayerScreen(
 
         if (!fullscreen && servers.isNotEmpty()) {
             Column(Modifier.padding(14.dp)) {
-                Text("PLAYBACK SETTINGS", color = Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(7.dp))
+                Text("PLAYBACK SETTINGS", color = Gray, fontSize = 8.5.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(6.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Box(Modifier.weight(1f)) {
                         SmallOutlineButton("Audio: ${language.ifBlank { "Select" }}", onClick = { languageMenu = true }, modifier = Modifier.fillMaxWidth())
                         DropdownMenu(languageMenu, { languageMenu = false }) {
                             allLanguages.forEach { lang ->
-                                DropdownMenuItem(text = { Text(lang, fontSize = 12.sp) }, onClick = {
+                                DropdownMenuItem(text = { Text(lang, fontSize = 11.sp) }, onClick = {
                                     language = lang
                                     val avail = servers.filter { it.language.equals(lang, true) }
                                     quality = avail.firstOrNull { it.quality.equals("720p", true) }?.quality ?: avail.firstOrNull()?.quality.orEmpty()
@@ -3014,24 +3106,24 @@ fun PlayerScreen(
                     Box(Modifier.weight(1f)) {
                         SmallOutlineButton("Quality: ${quality.ifBlank { "Select" }}", onClick = { qualityMenu = true }, modifier = Modifier.fillMaxWidth())
                         DropdownMenu(qualityMenu, { qualityMenu = false }) {
-                            qualities.forEach { q -> DropdownMenuItem(text = { Text(q, fontSize = 12.sp) }, onClick = { quality = q; qualityMenu = false }) }
+                            qualities.forEach { q -> DropdownMenuItem(text = { Text(q, fontSize = 11.sp) }, onClick = { quality = q; qualityMenu = false }) }
                         }
                     }
                 }
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(7.dp))
                 SmallOutlineButton(
                     text = if (dlUrl.isBlank()) "↓ Download link unavailable" else "↓ Download Episode",
                     onClick = { triggerDownload() },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = dlUrl.isNotBlank()
                 )
-                downloadMessage?.let { Text(it, color = AccentRed, fontSize = 10.sp, modifier = Modifier.padding(top = 6.dp)) }
+                downloadMessage?.let { Text(it, color = AccentRed, fontSize = 10.sp, modifier = Modifier.padding(top = 5.dp)) }
                 selected?.let {
                     Text(
                         "Server: ${it.serverName}  •  ${it.quality}",
                         color = Gray,
-                        fontSize = 10.sp,
-                        modifier = Modifier.padding(top = 8.dp)
+                        fontSize = 9.5.sp,
+                        modifier = Modifier.padding(top = 6.dp)
                     )
                 }
             }
@@ -3039,22 +3131,21 @@ fun PlayerScreen(
 
         if (!fullscreen) {
             Column(Modifier.padding(horizontal = 14.dp)) {
-                Text("EPISODE NAVIGATION", color = Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(7.dp))
+                Text("EPISODE NAVIGATION", color = Gray, fontSize = 8.5.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(6.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     SmallOutlineButton("← Previous", onClick = { onEpisodeChange(episodeIndex - 1) }, modifier = Modifier.weight(1f), enabled = episodeIndex > 0)
                     SmallOutlineButton("Next Episode →", onClick = { onEpisodeChange(episodeIndex + 1) }, modifier = Modifier.weight(1f), enabled = episodeIndex >= 0 && episodeIndex < episodes.lastIndex, selected = true)
                 }
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(8.dp))
             }
 
-            // Comments & Admin Reply Section inside Watch Page
             CommentsSection(
                 animeId = animeId,
                 userSession = userSession,
                 onLoginRequired = onLoginRequired
             )
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(16.dp))
         }
     }
 }
@@ -3924,7 +4015,7 @@ fun DownloadsScreen(onPlay: (DownloadInfo) -> Unit) {
                     .padding(20.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text("↓", color = AccentRed, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold)
+                Text("↓", color = AccentRed, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
                 Spacer(Modifier.height(6.dp))
                 Text("Abhi koi download nahi hai", color = White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(4.dp))
@@ -3939,7 +4030,7 @@ fun DownloadsScreen(onPlay: (DownloadInfo) -> Unit) {
                     .padding(bottom = 10.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .background(SurfaceDark)
-                    .padding(12.dp)
+                    .padding(11.dp)
             ) {
                 Text(item.title, color = White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(4.dp))
@@ -3969,7 +4060,7 @@ fun DownloadsScreen(onPlay: (DownloadInfo) -> Unit) {
                         color = AccentRed,
                         trackColor = Color(0xFF33343A)
                     )
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(7.dp))
                     SmallOutlineButton(
                         text = "✕ Cancel Download",
                         onClick = {
@@ -3982,7 +4073,7 @@ fun DownloadsScreen(onPlay: (DownloadInfo) -> Unit) {
                 }
 
                 if (item.status == "Failed") {
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(7.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (item.sourceUrl.isNotBlank()) {
                             SmallOutlineButton(
@@ -4013,7 +4104,7 @@ fun DownloadsScreen(onPlay: (DownloadInfo) -> Unit) {
                 }
 
                 if (item.status == "Completed") {
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(7.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         SmallOutlineButton(
                             text = "▶ PLAY OFFLINE",
@@ -4092,6 +4183,7 @@ fun LocalDownloadedPlayer(download: DownloadInfo, onBack: () -> Unit) {
     }
 }
 
+/* ULTRA-COMPACT CUSTOM OUTLINE BUTTON (No Material3 48dp forced height) */
 @Composable
 fun SmallOutlineButton(
     text: String,
@@ -4100,38 +4192,53 @@ fun SmallOutlineButton(
     enabled: Boolean = true,
     selected: Boolean = false
 ) {
-    OutlinedButton(
-        onClick = onClick,
-        modifier = modifier.heightIn(min = 30.dp),
-        enabled = enabled,
-        contentPadding = PaddingValues(horizontal = 9.dp, vertical = 4.dp),
-        shape = RoundedCornerShape(8.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, if (selected) AccentRed else Color(0xFF4E505B)),
-        colors = ButtonDefaults.outlinedButtonColors(
-            containerColor = if (selected) Color(0xFF28121B) else Color.Transparent,
-            contentColor = if (selected) AccentRed else White,
-            disabledContentColor = Gray
-        )
+    val borderColor = when {
+        !enabled -> Color(0xFF2D2E37)
+        selected -> AccentRed
+        else -> Color(0xFF434552)
+    }
+    val bgColor = if (selected) Color(0xFF28121B) else Color(0xFF171821)
+    val txtColor = when {
+        !enabled -> Gray
+        selected -> AccentRed
+        else -> White
+    }
+
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(bgColor)
+            .border(1.dp, borderColor, RoundedCornerShape(6.dp))
+            .clickable(enabled = enabled) { onClick() }
+            .padding(horizontal = 9.dp, vertical = 4.5.dp),
+        contentAlignment = Alignment.Center
     ) {
-        Text(text, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        Text(
+            text = text,
+            color = txtColor,
+            fontSize = 9.5.sp,
+            lineHeight = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1
+        )
     }
 }
 
 @Composable
 fun DetailSection(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 7.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 Modifier
                     .width(3.dp)
-                    .height(14.dp)
+                    .height(13.dp)
                     .clip(RoundedCornerShape(2.dp))
                     .background(AccentRed)
             )
             Spacer(Modifier.width(7.dp))
-            Text(title, color = White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text(title, color = White, fontSize = 14.5.sp, fontWeight = FontWeight.Bold)
         }
-        Spacer(Modifier.height(7.dp))
+        Spacer(Modifier.height(6.dp))
         content()
     }
 }
