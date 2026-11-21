@@ -307,29 +307,57 @@ fun AniStreamApp() {
 fun HomeScreen(animeList: List<Anime>, loading: Boolean, error: String?, onAnimeClick: (Anime) -> Unit) {
     val movies = animeList.filter { it.animeType.equals("Movie", true) }
     val series = animeList.filter { !it.animeType.equals("Movie", true) }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
-        Text("WELCOME TO ANISTREAM", color = AccentRed, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(7.dp))
-        Text("Anime World Awaits You.", color = White, fontSize = 23.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(18.dp))
-        Box(Modifier.fillMaxWidth().height(155.dp).clip(RoundedCornerShape(18.dp))
-            .background(Color(0xFF30101B)).padding(18.dp), contentAlignment = Alignment.BottomStart) {
-            Column {
-                Text("ANIME STREAMING", color = AccentRed, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(7.dp))
-                Text("Your Anime.\nYour World.", color = White, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
-                Text("Discover your next adventure.", color = Gray, fontSize = 12.sp)
+    val featured = animeList.firstOrNull()
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("WELCOME BACK", color = AccentRed, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.5.sp)
+                Text("Discover Anime", color = White, fontSize = 25.sp, fontWeight = FontWeight.ExtraBold)
+            }
+            Box(Modifier.size(42.dp).clip(RoundedCornerShape(14.dp)).background(SurfaceDark), contentAlignment = Alignment.Center) {
+                Text("A", color = AccentRed, fontSize = 23.sp, fontWeight = FontWeight.Black)
             }
         }
-        Spacer(Modifier.height(22.dp))
-        if (loading) Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(color = AccentRed)
-        } else if (error != null) Text("Anime load error: $error", color = AccentRed)
-        else if (animeList.isEmpty()) Text("No published anime found.", color = Gray)
-        else {
-            AnimeSection("✨ Recently Added", animeList, onAnimeClick)
-            AnimeSection("🎬 Anime Series", series, onAnimeClick)
-            if (movies.isNotEmpty()) AnimeSection("🍿 Anime Movies", movies, onAnimeClick)
+        Spacer(Modifier.height(12.dp))
+        if (loading) {
+            Box(Modifier.fillMaxWidth().height(230.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = AccentRed) }
+        } else if (error != null) {
+            Column(Modifier.padding(horizontal = 18.dp, vertical = 20.dp)) {
+                Text("Unable to load anime", color = White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(6.dp)); Text(error, color = AccentRed, fontSize = 12.sp)
+            }
+        } else if (featured == null) {
+            Box(Modifier.fillMaxWidth().height(210.dp), contentAlignment = Alignment.Center) { Text("No published anime found yet.", color = Gray, fontSize = 13.sp) }
+        } else {
+            Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(224.dp).clip(RoundedCornerShape(22.dp)).background(SurfaceDark).clickable { onAnimeClick(featured) }) {
+                AsyncImage(model = featured.posterUrl, contentDescription = featured.title, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                Box(Modifier.fillMaxSize().background(Color(0xCC050509)))
+                Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(18.dp)) {
+                    Surface(color = AccentRed, shape = RoundedCornerShape(5.dp)) {
+                        Text("FEATURED ANIME", color = White, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp))
+                    }
+                    Spacer(Modifier.height(9.dp))
+                    Text(featured.title, color = White, fontSize = 23.sp, fontWeight = FontWeight.ExtraBold, maxLines = 2)
+                    Spacer(Modifier.height(5.dp))
+                    Text(featured.description.ifBlank { "Explore this anime on AniStream Hindi." }.replace(Regex("<[^>]*>"), ""), color = Color(0xFFD0D0D5), fontSize = 11.sp, maxLines = 2)
+                    Spacer(Modifier.height(12.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(color = White, shape = RoundedCornerShape(8.dp)) {
+                            Text("▶  VIEW DETAILS", color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.clickable { onAnimeClick(featured) }.padding(horizontal = 13.dp, vertical = 9.dp))
+                        }
+                        Spacer(Modifier.width(9.dp))
+                        Text("ANISTREAM HINDI", color = Color(0xFFE5E5E5), fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    }
+                }
+            }
+            Spacer(Modifier.height(24.dp))
+            AnimeSection("Recently Added", animeList, onAnimeClick)
+            AnimeSection("Anime Series", series, onAnimeClick)
+            if (movies.isNotEmpty()) AnimeSection("Anime Movies", movies, onAnimeClick)
+            Column(Modifier.padding(horizontal = 18.dp).padding(bottom = 18.dp)) {
+                Text("ANISTREAM HINDI", color = AccentRed, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.4.sp)
+                Text("Your anime world, all in one place.", color = Gray, fontSize = 11.sp)
+            }
         }
     }
 }
@@ -337,23 +365,32 @@ fun HomeScreen(animeList: List<Anime>, loading: Boolean, error: String?, onAnime
 @Composable
 fun AnimeSection(title: String, animeList: List<Anime>, onAnimeClick: (Anime) -> Unit) {
     if (animeList.isEmpty()) return
-    Column {
-        Text(title, color = White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(11.dp))
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            animeList.forEach { AnimeCard(it) { onAnimeClick(it) } }
+    Column(Modifier.fillMaxWidth().padding(bottom = 22.dp)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(title, color = White, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold)
+            Spacer(Modifier.weight(1f))
+            Text("SWIPE  ›", color = Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
         }
-        Spacer(Modifier.height(23.dp))
+        Spacer(Modifier.height(12.dp))
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 18.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            animeList.forEach { anime -> AnimeCard(anime) { onAnimeClick(anime) } }
+        }
     }
 }
 
 @Composable
 fun AnimeCard(anime: Anime, onClick: () -> Unit) {
-    Column(Modifier.width(124.dp).clickable { onClick() }) {
-        AsyncImage(anime.posterUrl, anime.title, Modifier.fillMaxWidth().height(164.dp)
-            .clip(RoundedCornerShape(11.dp)).background(SurfaceDark), contentScale = ContentScale.Crop)
-        Spacer(Modifier.height(6.dp))
-        Text(anime.title, color = White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
+    Column(Modifier.width(126.dp).clickable { onClick() }) {
+        Box(Modifier.fillMaxWidth().height(170.dp).clip(RoundedCornerShape(13.dp)).background(SurfaceDark)) {
+            AsyncImage(anime.posterUrl, anime.title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            if (anime.animeType.equals("Movie", true)) {
+                Surface(Modifier.align(Alignment.TopStart).padding(7.dp), color = AccentRed, shape = RoundedCornerShape(5.dp)) {
+                    Text("MOVIE", color = White, fontSize = 8.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp))
+                }
+            }
+        }
+        Spacer(Modifier.height(7.dp))
+        Text(anime.title, color = White, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 2, minLines = 2)
     }
 }
 
@@ -690,9 +727,9 @@ fun WatchPlayer(videoUrl: String, episodeId: String, fullscreen: Boolean, onExit
         }
         AndroidView(factory = { ctx -> PlayerView(ctx).apply {
             useController = true
-            this.player = exoPlayer
+            setPlayer(exoPlayer)
             setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
-        } }, update = { it.player = exoPlayer },
+        } }, update = { it.setPlayer(exoPlayer) },
             modifier = Modifier.fillMaxWidth().then(if (fullscreen) Modifier.fillMaxHeight() else Modifier.height(230.dp)).background(Color.Black))
     }
     if (fullscreen) {
