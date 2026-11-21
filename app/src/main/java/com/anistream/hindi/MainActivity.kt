@@ -588,7 +588,7 @@ fun PlayerScreen(episode: AnimeEpisode, episodes: List<AnimeEpisode>, episodeInd
                     Text("ANISTREAM PLAYER", color = AccentRed, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
                     Text("Episode ${episode.episodeNumber}", color = Gray, fontSize = 10.sp)
                 }
-                SmallOutlineButton("⛶") { fullscreen = true }
+                SmallOutlineButton("⛶", onClick = { fullscreen = true })
             }
             Text(episode.title.ifBlank { "Episode ${episode.episodeNumber}" }, color = White, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(15.dp))
         }
@@ -827,7 +827,7 @@ fun LocalDownloadedPlayer(download: DownloadInfo, onBack: () -> Unit) {
                     Text("OFFLINE PLAYER", color = AccentRed, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     Text(download.title, color = White, fontSize = 11.sp, maxLines = 1)
                 }
-                SmallOutlineButton("⛶") { fullscreen = true }
+                SmallOutlineButton("⛶", onClick = { fullscreen = true })
             }
         }
         Box(Modifier.fillMaxWidth().weight(1f).background(Color.Black)) {
