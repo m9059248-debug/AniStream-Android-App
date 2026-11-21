@@ -1,70 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Outer Black Background -->
-    <path
-        android:fillColor="#050508"
-        android:pathData="M0,0h108v108h-108z" />
+    <uses-permission android:name="android.permission.INTERNET" />
 
-    <!-- Rounded Glossy Squircle Base -->
-    <path
-        android:fillColor="#0B0C12"
-        android:pathData="M26,10L82,10A16,16 0,0 1,98 26L98,82A16,16 0,0 1,82 98L26,98A16,16 0,0 1,10 82L10,26A16,16 0,0 1,26 10Z" />
+    <application
+        android:allowBackup="false"
+        android:icon="@drawable/app_logo"
+        android:roundIcon="@drawable/app_logo"
+        android:label="AniStream Hindi"
+        android:theme="@android:style/Theme.Material.NoActionBar"
+        android:usesCleartextTraffic="false">
 
-    <!-- Top-Left Crimson Corner Slash -->
-    <path
-        android:fillColor="#E6FF1744"
-        android:pathData="M26,10L54,10L10,54L10,26A16,16 0,0 1,26 10Z" />
-    <path
-        android:fillColor="#44FFFFFF"
-        android:pathData="M54,10L62,10L10,62L10,54Z" />
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|keyboardHidden">
 
-    <!-- Bottom-Right Crimson Corner Slash -->
-    <path
-        android:fillColor="#E6FF1744"
-        android:pathData="M98,54L98,82A16,16 0,0 1,82 98L54,98Z" />
-    <path
-        android:fillColor="#44FFFFFF"
-        android:pathData="M98,46L98,54L54,98L46,98Z" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
 
-    <!-- Neon Red Glowing Border -->
-    <path
-        android:fillColor="#00000000"
-        android:strokeColor="#FF1744"
-        android:strokeWidth="3"
-        android:pathData="M26,10L82,10A16,16 0,0 1,98 26L98,82A16,16 0,0 1,82 98L26,98A16,16 0,0 1,10 82L10,26A16,16 0,0 1,26 10Z" />
+        </activity>
 
-    <!-- Red Orbit Swoosh Ring -->
-    <path
-        android:fillColor="#00000000"
-        android:strokeColor="#FF1744"
-        android:strokeWidth="4.5"
-        android:strokeLineCap="round"
-        android:pathData="M26,56C20,44 38,30 62,28C80,26 88,36 80,48C72,58 44,64 26,56Z" />
+    </application>
 
-    <!-- White Play Button Triangle -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M45,27L71,43L45,59Z" />
-
-    <!-- Bottom Brand Bars (AniStream Hindi Accent) -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M24,69L47,69L45,75L22,75Z" />
-    <path
-        android:fillColor="#FF1744"
-        android:pathData="M50,69L85,69L83,75L48,75Z" />
-    <path
-        android:fillColor="#FF1744"
-        android:pathData="M22,82L40,81L40,84L22,83Z" />
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M44,79L64,79L63,85L43,85Z" />
-    <path
-        android:fillColor="#FF1744"
-        android:pathData="M68,81L86,82L86,83L68,84Z" />
-</vector>
+</manifest>
