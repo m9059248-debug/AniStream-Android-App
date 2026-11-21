@@ -919,7 +919,7 @@ fun AniStreamApp() {
             bottomBar = {
                 if (selectedAnime == null && offlineDownload == null) {
                     NavigationBar(containerColor = SurfaceDark, tonalElevation = 0.dp) {
-                        val labels = listOf("Home", "Explore", "My List", "Downloads", "Profile")
+                        val labels = listOf("Home", "Search", "My List", "Downloads", "Profile")
                         val icons = listOf("⌂", "⌕", "♡", "↓", "♙")
                         labels.forEachIndexed { index, label ->
                             NavigationBarItem(
@@ -1144,7 +1144,6 @@ fun CommentsSection(
                         onClick = { loadComments() },
                         enabled = !loading && !posting
                     )
-                    // Compact Sleek "Post Comment" Pill Button
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
@@ -1275,7 +1274,6 @@ fun CommentsSection(
                         Spacer(Modifier.height(5.dp))
                         Text(item.content, color = Color(0xFFE2E4EC), fontSize = 11.sp, lineHeight = 14.sp)
 
-                        // Ultra-Compact Admin Reply Box & Badge
                         if (item.adminReply.isNotBlank()) {
                             Spacer(Modifier.height(6.dp))
                             Column(
@@ -1352,7 +1350,6 @@ fun HomeScreen(
     }
     val movies = remember(animeList) { animeList.filter { it.animeType.equals("Movie", true) } }
     val series = remember(animeList) { animeList.filter { !it.animeType.equals("Movie", true) } }
-    val savedContinueList = remember(animeList, myListIds) { animeList.filter { myListIds.contains(it.id) } }
 
     val featuredSlides = remember(filteredList, animeList) {
         (filteredList.ifEmpty { animeList }).take(6)
@@ -1543,24 +1540,6 @@ fun HomeScreen(
                             )
                         }
 
-                        Box(
-                            Modifier
-                                .align(Alignment.TopEnd)
-                                .padding(12.dp)
-                                .size(26.dp)
-                                .clip(CircleShape)
-                                .background(if (isFeaturedSaved) AccentRed else Color(0xAA14151C))
-                                .clickable { onToggleMyList(featured) },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                if (isFeaturedSaved) "♥" else "♡",
-                                color = White,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
                         Column(
                             Modifier
                                 .align(Alignment.BottomStart)
@@ -1613,31 +1592,49 @@ fun HomeScreen(
                             Spacer(Modifier.height(2.dp))
                             Text(
                                 featured.description
-                                    .ifBlank { "Stream in Hindi on AniStream." }
+                                    .ifBlank { "Explore this anime on AniStream Hindi." }
                                     .replace(Regex("\\<[^\\>]*\\>"), ""),
                                 color = Gray,
                                 fontSize = 10.5.sp,
-                                maxLines = 1,
+                                maxLines = 2,
                                 overflow = TextOverflow.Ellipsis
                             )
-                            Spacer(Modifier.height(9.dp))
+                            Spacer(Modifier.height(10.dp))
 
-                            Box(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .height(30.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(AccentRed)
-                                    .clickable { onAnimeClick(featured) },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    "▶  Watch Now",
-                                    color = White,
-                                    fontSize = 11.sp,
-                                    lineHeight = 12.sp,
-                                    fontWeight = FontWeight.ExtraBold
-                                )
+                            // Restored Previous System: "▶ VIEW DETAILS" + "+ MY LIST / ✓ IN MY LIST"
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Box(
+                                    Modifier
+                                        .clip(RoundedCornerShape(7.dp))
+                                        .background(White)
+                                        .clickable { onAnimeClick(featured) }
+                                        .padding(horizontal = 11.dp, vertical = 7.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        "▶  VIEW DETAILS",
+                                        color = Color.Black,
+                                        fontSize = 9.5.sp,
+                                        lineHeight = 11.sp,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                }
+                                Box(
+                                    Modifier
+                                        .clip(RoundedCornerShape(7.dp))
+                                        .background(if (isFeaturedSaved) AccentRed else Color(0xFF252733))
+                                        .clickable { onToggleMyList(featured) }
+                                        .padding(horizontal = 11.dp, vertical = 7.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        if (isFeaturedSaved) "✓  IN MY LIST" else "+  MY LIST",
+                                        color = White,
+                                        fontSize = 9.5.sp,
+                                        lineHeight = 11.sp,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                }
                             }
                         }
                     }
@@ -1690,10 +1687,6 @@ fun HomeScreen(
                 }
 
                 Spacer(Modifier.height(10.dp))
-
-                if (savedContinueList.isNotEmpty()) {
-                    AnimeSection("Saved in Watchlist", savedContinueList, onAnimeClick)
-                }
 
                 if (selectedCategory == "Latest" || selectedCategory == "Hindi" || selectedCategory == "Popular") {
                     AnimeSection("Recently Added", filteredList, onAnimeClick)
@@ -2536,7 +2529,7 @@ fun SearchScreen(
     }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        Text("Explore Anime", color = White, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
+        Text("Search Anime", color = White, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
         Spacer(Modifier.height(8.dp))
         OutlinedTextField(
             value = searchText,
@@ -2776,10 +2769,12 @@ fun AnimeDetailsScreen(
                 Text("⭐ ${details?.rating ?: "Loading..."}", color = AccentRed, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                 Text("Year: ${details?.year ?: "Loading..."}", color = Gray, fontSize = 10.sp)
                 Text("Episodes: ${details?.episodes ?: "Loading..."}", color = Gray, fontSize = 10.sp)
-                Spacer(Modifier.height(7.dp))
+                Spacer(Modifier.height(8.dp))
+                // Restored Previous System for My List Button on Details Page
                 SmallOutlineButton(
-                    text = if (isInMyList) "♥ In My List" else "♡ Add to My List",
+                    text = if (isInMyList) "♥  In My List (Remove)" else "♡  Add to My List",
                     onClick = onToggleMyList,
+                    modifier = Modifier.fillMaxWidth(),
                     selected = isInMyList
                 )
             }
@@ -2826,7 +2821,6 @@ fun AnimeDetailsScreen(
                 SmallOutlineButton(text = "↻ Retry Seasons", onClick = { loadSeasons(force = true) })
             } else if (seasons.isEmpty()) Text("Abhi is Anime ke Seasons add nahi kiye gaye hain.", color = Gray, fontSize = 11.sp)
             else {
-                // Compact Sleek Season Pills
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -4183,7 +4177,7 @@ fun LocalDownloadedPlayer(download: DownloadInfo, onBack: () -> Unit) {
     }
 }
 
-/* ULTRA-COMPACT CUSTOM OUTLINE BUTTON (No Material3 48dp forced height) */
+/* ULTRA-COMPACT CUSTOM OUTLINE BUTTON */
 @Composable
 fun SmallOutlineButton(
     text: String,
