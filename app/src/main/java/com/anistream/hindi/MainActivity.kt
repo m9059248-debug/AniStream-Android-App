@@ -680,19 +680,19 @@ fun WatchPlayer(videoUrl: String, episodeId: String, fullscreen: Boolean, onExit
             modifier = Modifier.fillMaxWidth().height(if (fullscreen) 300.dp else 230.dp).background(Color.Black)
         )
     } else {
-        val player = remember(context, episodeId) { ExoPlayer.Builder(context).build() }
-        DisposableEffect(player) { onDispose { player.release() } }
-        LaunchedEffect(player, videoUrl) {
-            player.setMediaItem(MediaItem.fromUri(videoUrl))
-            player.prepare()
-            player.playWhenReady = true
-            player.playbackParameters = PlaybackParameters(1f)
+        val exoPlayer = remember(context, episodeId) { ExoPlayer.Builder(context).build() }
+        DisposableEffect(exoPlayer) { onDispose { exoPlayer.release() } }
+        LaunchedEffect(exoPlayer, videoUrl) {
+            exoPlayer.setMediaItem(MediaItem.fromUri(videoUrl))
+            exoPlayer.prepare()
+            exoPlayer.playWhenReady = true
+            exoPlayer.playbackParameters = PlaybackParameters(1f)
         }
         AndroidView(factory = { ctx -> PlayerView(ctx).apply {
             useController = true
-            player = player
+            this.player = exoPlayer
             setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
-        } }, update = { it.player = player },
+        } }, update = { it.player = exoPlayer },
             modifier = Modifier.fillMaxWidth().then(if (fullscreen) Modifier.fillMaxHeight() else Modifier.height(230.dp)).background(Color.Black))
     }
     if (fullscreen) {
