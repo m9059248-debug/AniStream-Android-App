@@ -50,13 +50,10 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -142,163 +139,20 @@ data class UserSession(
     val createdAt: String,
     val avatarUrl: String = ""
 )
+data class AnimeComment(
+    val id: String,
+    val animeId: String,
+    val userId: String,
+    val userName: String,
+    val content: String,
+    val adminReply: String,
+    val createdAt: String
+)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent { AniStreamApp() }
-    }
-}
-
-/**
- * AniStream Hindi Official App Logo Component
- * Automatically loads `res/drawable/app_logo.png` if present,
- * or renders the exact glowing red squircle + play orbit logo via Canvas.
- */
-@Composable
-fun AniStreamBrandLogo(
-    size: Dp = 34.dp,
-    showTextInside: Boolean = false,
-    modifier: Modifier = Modifier
-) {
-    val context = LocalContext.current
-    val drawableId = remember(context) {
-        context.resources.getIdentifier("app_logo", "drawable", context.packageName)
-    }
-    val cornerRadius = (size.value * 0.24f).dp
-
-    if (drawableId != 0) {
-        Image(
-            painter = painterResource(id = drawableId),
-            contentDescription = "AniStream Hindi Logo",
-            modifier = modifier
-                .size(size)
-                .clip(RoundedCornerShape(cornerRadius)),
-            contentScale = ContentScale.Crop
-        )
-    } else {
-        Box(
-            modifier = modifier
-                .size(size)
-                .clip(RoundedCornerShape(cornerRadius))
-                .background(
-                    Brush.linearGradient(
-                        colors = listOf(
-                            Color(0xFF2B030A),
-                            Color(0xFF07070B),
-                            Color(0xFF07070B),
-                            Color(0xFF33040C)
-                        )
-                    )
-                )
-                .border(
-                    width = (size.value * 0.045f).coerceAtLeast(1.2f).dp,
-                    brush = Brush.linearGradient(
-                        colors = listOf(
-                            Color(0xFFFF2A55),
-                            Color(0xFFB70020),
-                            Color(0xFFFF1744)
-                        )
-                    ),
-                    shape = RoundedCornerShape(cornerRadius)
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Canvas(Modifier.fillMaxSize()) {
-                val w = this.size.width
-                val h = this.size.height
-
-                // Top-left & bottom-right red glossy corner ribbons
-                val topRibbon = Path().apply {
-                    moveTo(0f, 0f)
-                    lineTo(w * 0.45f, 0f)
-                    lineTo(0f, h * 0.45f)
-                    close()
-                }
-                drawPath(topRibbon, color = Color(0x66FF1744))
-
-                val bottomRibbon = Path().apply {
-                    moveTo(w, h)
-                    lineTo(w * 0.55f, h)
-                    lineTo(w, h * 0.55f)
-                    close()
-                }
-                drawPath(bottomRibbon, color = Color(0x66FF1744))
-
-                val centerY = if (showTextInside) h * 0.34f else h * 0.50f
-                val centerX = w * 0.50f
-
-                // Red Orbit Swoosh Ring around Play Icon
-                rotate(degrees = -18f, pivot = Offset(centerX, centerY)) {
-                    drawOval(
-                        color = AccentRed,
-                        topLeft = Offset(centerX - w * 0.34f, centerY - h * 0.13f),
-                        size = Size(w * 0.68f, h * 0.26f),
-                        style = Stroke(width = (w * 0.065f).coerceAtLeast(2f), cap = StrokeCap.Round)
-                    )
-                }
-
-                // Glowing White Play Triangle
-                val triSize = if (showTextInside) w * 0.28f else w * 0.38f
-                val playPath = Path().apply {
-                    moveTo(centerX - triSize * 0.38f, centerY - triSize * 0.48f)
-                    lineTo(centerX + triSize * 0.55f, centerY)
-                    lineTo(centerX - triSize * 0.38f, centerY + triSize * 0.48f)
-                    close()
-                }
-                drawPath(playPath, color = White)
-            }
-
-            if (showTextInside) {
-                Column(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = (size.value * 0.11f).dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "Ani",
-                            color = White,
-                            fontSize = (size.value * 0.15f).sp,
-                            fontWeight = FontWeight.Black,
-                            fontStyle = FontStyle.Italic
-                        )
-                        Text(
-                            text = "Stream",
-                            color = AccentRed,
-                            fontSize = (size.value * 0.15f).sp,
-                            fontWeight = FontWeight.Black,
-                            fontStyle = FontStyle.Italic
-                        )
-                    }
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Box(
-                            Modifier
-                                .width((size.value * 0.16f).dp)
-                                .height(2.dp)
-                                .background(AccentRed)
-                        )
-                        Text(
-                            text = "Hindi",
-                            color = White,
-                            fontSize = (size.value * 0.10f).sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            fontStyle = FontStyle.Italic
-                        )
-                        Box(
-                            Modifier
-                                .width((size.value * 0.16f).dp)
-                                .height(2.dp)
-                                .background(AccentRed)
-                        )
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -557,6 +411,103 @@ private suspend fun supabaseRemoveFromMyList(session: UserSession, animeId: Stri
         )
     }
     supabaseSyncMyListMetadata(session, allIds)
+}
+
+/* COMMENTS & ADMIN REPLY SUPABASE API */
+private suspend fun fetchCommentsForAnime(animeId: String): List<AnimeComment> = withContext(Dispatchers.IO) {
+    val url = "$SUPABASE_URL/rest/v1/comments?select=*&anime_id=eq.${Uri.encode(animeId)}&order=created_at.desc"
+    val res = request(url, method = "GET", supabase = true)
+    val arr = JSONArray(res)
+    (0 until arr.length()).mapNotNull { i ->
+        val obj = arr.getJSONObject(i)
+        val rawContent = obj.optString("content").takeUnless { it == "null" }.orEmpty()
+            .ifBlank { obj.optString("comment").takeUnless { it == "null" }.orEmpty() }
+        if (rawContent.isBlank()) return@mapNotNull null
+
+        val userId = obj.optString("user_id").takeUnless { it == "null" }.orEmpty()
+        val explicitName = obj.optString("user_name").takeUnless { it == "null" }.orEmpty()
+            .ifBlank { obj.optString("username").takeUnless { it == "null" }.orEmpty() }
+
+        // If user name was embedded as "[Name] message", extract it cleanly
+        val (parsedName, cleanContent) = if (explicitName.isBlank() && rawContent.startsWith("[") && rawContent.contains("] ")) {
+            val endBracket = rawContent.indexOf("] ")
+            val extractedName = rawContent.substring(1, endBracket).trim()
+            val remainingText = rawContent.substring(endBracket + 2).trim()
+            extractedName to remainingText
+        } else {
+            val fallbackName = explicitName.ifBlank {
+                if (userId.length > 8) "User • ${userId.take(6)}" else userId.ifBlank { "Anime Fan" }
+            }
+            fallbackName to rawContent
+        }
+
+        val reply = obj.optString("admin_reply").takeUnless { it == "null" }.orEmpty()
+        val created = obj.optString("created_at").takeUnless { it == "null" }.orEmpty().take(10)
+
+        AnimeComment(
+            id = obj.optString("id"),
+            animeId = obj.optString("anime_id"),
+            userId = userId,
+            userName = parsedName,
+            content = cleanContent,
+            adminReply = reply,
+            createdAt = created
+        )
+    }
+}
+
+private suspend fun postAnimeComment(
+    animeId: String,
+    commentText: String,
+    session: UserSession
+) = withContext(Dispatchers.IO) {
+    val displayName = session.fullName.ifBlank { session.email.substringBefore("@") }.ifBlank { "Member" }
+    val taggedContent = "[$displayName] ${commentText.trim()}"
+
+    // Primary insert using standard columns (anime_id, user_id, content)
+    val primaryPayload = JSONObject().apply {
+        put("anime_id", animeId)
+        put("user_id", session.userId)
+        put("content", taggedContent)
+    }
+
+    val primaryAttempt = runCatching {
+        request(
+            "$SUPABASE_URL/rest/v1/comments",
+            method = "POST",
+            body = primaryPayload.toString(),
+            supabase = true,
+            bearerToken = session.accessToken,
+            extraHeaders = mapOf("Prefer" to "return=minimal")
+        )
+    }
+
+    if (primaryAttempt.isFailure) {
+        // Fallback if table uses 'comment' column instead of 'content'
+        val fallbackPayload = JSONObject().apply {
+            put("anime_id", animeId)
+            put("user_id", session.userId)
+            put("comment", taggedContent)
+        }
+        request(
+            "$SUPABASE_URL/rest/v1/comments",
+            method = "POST",
+            body = fallbackPayload.toString(),
+            supabase = true,
+            bearerToken = session.accessToken,
+            extraHeaders = mapOf("Prefer" to "return=minimal")
+        )
+    }
+}
+
+private suspend fun deleteAnimeComment(commentId: String, session: UserSession) = withContext(Dispatchers.IO) {
+    val url = "$SUPABASE_URL/rest/v1/comments?id=eq.${Uri.encode(commentId)}"
+    request(
+        url,
+        method = "DELETE",
+        supabase = true,
+        bearerToken = session.accessToken
+    )
 }
 
 private fun parseUserSession(root: JSONObject, fallbackToken: String = "", fallbackAvatar: String = ""): UserSession {
@@ -874,7 +825,6 @@ private fun readDownloads(context: Context): List<DownloadInfo> {
 fun AniStreamApp() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var showSplash by remember { mutableStateOf(true) }
     var tab by remember { mutableIntStateOf(0) }
     var animeList by remember { mutableStateOf<List<Anime>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
@@ -940,8 +890,6 @@ fun AniStreamApp() {
 
     LaunchedEffect(Unit) {
         loadAllAnime()
-        delay(1300L)
-        showSplash = false
     }
 
     LaunchedEffect(userSession?.accessToken) {
@@ -968,176 +916,381 @@ fun AniStreamApp() {
     val badgeLetter = (userSession?.fullName?.firstOrNull() ?: userSession?.email?.firstOrNull() ?: 'A').uppercaseChar()
 
     MaterialTheme {
-        if (showSplash) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Background),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    AniStreamBrandLogo(size = 135.dp, showTextInside = true)
-                    Spacer(Modifier.height(18.dp))
-                    CircularProgressIndicator(
-                        color = AccentRed,
-                        modifier = Modifier.size(22.dp),
-                        strokeWidth = 2.dp
-                    )
-                }
-            }
-        } else {
-            Scaffold(
-                containerColor = Background,
-                bottomBar = {
-                    if (selectedAnime == null && offlineDownload == null) {
-                        NavigationBar(containerColor = SurfaceDark, tonalElevation = 0.dp) {
-                            val labels = listOf("Home", "Explore", "My List", "Downloads", "Profile")
-                            val icons = listOf("⌂", "⌕", "♡", "↓", "♙")
-                            labels.forEachIndexed { index, label ->
-                                NavigationBarItem(
-                                    selected = tab == index,
-                                    onClick = { tab = index },
-                                    icon = { Text(icons[index], fontSize = 18.sp) },
-                                    label = { Text(label, fontSize = 9.sp, maxLines = 1) },
-                                    colors = NavigationBarItemDefaults.colors(
-                                        selectedIconColor = AccentRed, selectedTextColor = AccentRed,
-                                        indicatorColor = Color(0xFF281822), unselectedIconColor = Gray, unselectedTextColor = Gray
-                                    )
+        Scaffold(
+            containerColor = Background,
+            bottomBar = {
+                if (selectedAnime == null && offlineDownload == null) {
+                    NavigationBar(containerColor = SurfaceDark, tonalElevation = 0.dp) {
+                        val labels = listOf("Home", "Explore", "My List", "Downloads", "Profile")
+                        val icons = listOf("⌂", "⌕", "♡", "↓", "♙")
+                        labels.forEachIndexed { index, label ->
+                            NavigationBarItem(
+                                selected = tab == index,
+                                onClick = { tab = index },
+                                icon = { Text(icons[index], fontSize = 18.sp) },
+                                label = { Text(label, fontSize = 9.sp, maxLines = 1) },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = AccentRed, selectedTextColor = AccentRed,
+                                    indicatorColor = Color(0xFF281822), unselectedIconColor = Gray, unselectedTextColor = Gray
                                 )
-                            }
+                            )
                         }
                     }
                 }
-            ) { padding ->
-                Column(Modifier.fillMaxSize().background(Background).padding(padding)) {
-                    when {
-                        offlineDownload != null -> LocalDownloadedPlayer(offlineDownload!!, onBack = { offlineDownload = null })
-                        selectedAnime != null -> AnimeDetailsScreen(
-                            anime = selectedAnime!!,
-                            isInMyList = myListIds.contains(selectedAnime!!.id),
-                            onToggleMyList = { toggleMyList(selectedAnime!!.id) },
-                            onBack = { selectedAnime = null }
-                        )
-                        else -> {
-                            // Sleek Compact Top Header Bar with New App Logo
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                AniStreamBrandLogo(
-                                    size = 32.dp,
-                                    showTextInside = false,
-                                    modifier = Modifier.clickable { tab = 0 }
-                                )
-                                Spacer(Modifier.width(9.dp))
+            }
+        ) { padding ->
+            Column(Modifier.fillMaxSize().background(Background).padding(padding)) {
+                when {
+                    offlineDownload != null -> LocalDownloadedPlayer(offlineDownload!!, onBack = { offlineDownload = null })
+                    selectedAnime != null -> AnimeDetailsScreen(
+                        anime = selectedAnime!!,
+                        isInMyList = myListIds.contains(selectedAnime!!.id),
+                        userSession = userSession,
+                        onToggleMyList = { toggleMyList(selectedAnime!!.id) },
+                        onLoginRequired = {
+                            selectedAnime = null
+                            tab = 4
+                        },
+                        onBack = { selectedAnime = null }
+                    )
+                    else -> {
+                        // Clean Text Header Bar (No In-App Logo)
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Ani", color = White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+                            Text("Stream", color = AccentRed, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+                            Spacer(Modifier.width(6.dp))
+                            Surface(color = SurfaceDark, shape = RoundedCornerShape(5.dp)) {
                                 Text(
-                                    "Ani",
-                                    color = White,
-                                    fontSize = 21.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    fontStyle = FontStyle.Italic
-                                )
-                                Text(
-                                    "Stream",
+                                    "HINDI",
                                     color = AccentRed,
-                                    fontSize = 21.sp,
+                                    fontSize = 8.sp,
                                     fontWeight = FontWeight.ExtraBold,
-                                    fontStyle = FontStyle.Italic
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
                                 )
-                                Spacer(Modifier.width(6.dp))
-                                Surface(color = SurfaceDark, shape = RoundedCornerShape(5.dp)) {
-                                    Text(
-                                        "HINDI",
-                                        color = AccentRed,
-                                        fontSize = 8.sp,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
-                                    )
-                                }
-                                Spacer(Modifier.weight(1f))
-                                // Quick Search Icon
+                            }
+                            Spacer(Modifier.weight(1f))
+                            // Quick Search Icon
+                            Box(
+                                Modifier
+                                    .size(32.dp)
+                                    .clip(RoundedCornerShape(9.dp))
+                                    .background(SurfaceDark)
+                                    .clickable { tab = 1 },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("⌕", color = White, fontSize = 16.sp)
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            // Compact Profile Avatar Icon
+                            if (!userSession?.avatarUrl.isNullOrBlank()) {
+                                UserAvatarView(
+                                    avatarUrl = userSession?.avatarUrl.orEmpty(),
+                                    fallbackInitial = badgeLetter,
+                                    size = 32.dp,
+                                    fontSize = 14.sp,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(9.dp))
+                                        .border(1.dp, AccentRed, RoundedCornerShape(9.dp))
+                                        .clickable { tab = 4 }
+                                )
+                            } else {
                                 Box(
                                     Modifier
                                         .size(32.dp)
                                         .clip(RoundedCornerShape(9.dp))
                                         .background(SurfaceDark)
-                                        .clickable { tab = 1 },
+                                        .border(1.dp, Color(0xFF2B2D3C), RoundedCornerShape(9.dp))
+                                        .clickable { tab = 4 },
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Text("⌕", color = White, fontSize = 16.sp)
-                                }
-                                Spacer(Modifier.width(8.dp))
-                                // Compact Profile Avatar Icon
-                                if (!userSession?.avatarUrl.isNullOrBlank()) {
-                                    UserAvatarView(
-                                        avatarUrl = userSession?.avatarUrl.orEmpty(),
-                                        fallbackInitial = badgeLetter,
-                                        size = 32.dp,
-                                        fontSize = 14.sp,
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(9.dp))
-                                            .border(1.dp, AccentRed, RoundedCornerShape(9.dp))
-                                            .clickable { tab = 4 }
-                                    )
-                                } else {
-                                    Box(
-                                        Modifier
-                                            .size(32.dp)
-                                            .clip(RoundedCornerShape(9.dp))
-                                            .background(SurfaceDark)
-                                            .border(1.dp, Color(0xFF2B2D3C), RoundedCornerShape(9.dp))
-                                            .clickable { tab = 4 },
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(badgeLetter.toString(), color = AccentRed, fontSize = 14.sp, fontWeight = FontWeight.Black)
-                                    }
+                                    Text(badgeLetter.toString(), color = AccentRed, fontSize = 14.sp, fontWeight = FontWeight.Black)
                                 }
                             }
+                        }
 
-                            when (tab) {
-                                0 -> HomeScreen(
-                                    animeList = animeList,
-                                    loading = loading,
-                                    error = error,
-                                    myListIds = myListIds,
-                                    onRefresh = { loadAllAnime() },
-                                    onToggleMyList = { toggleMyList(it.id) },
-                                    onExploreClick = { tab = 1 },
-                                    onAnimeClick = { selectedAnime = it }
+                        when (tab) {
+                            0 -> HomeScreen(
+                                animeList = animeList,
+                                loading = loading,
+                                error = error,
+                                myListIds = myListIds,
+                                onRefresh = { loadAllAnime() },
+                                onToggleMyList = { toggleMyList(it.id) },
+                                onExploreClick = { tab = 1 },
+                                onAnimeClick = { selectedAnime = it }
+                            )
+                            1 -> SearchScreen(
+                                animeList = animeList,
+                                searchText = search,
+                                myListIds = myListIds,
+                                onToggleMyList = { toggleMyList(it.id) },
+                                onSearchChange = { search = it },
+                                onAnimeClick = { selectedAnime = it }
+                            )
+                            2 -> MyListScreen(
+                                animeList = animeList,
+                                myListIds = myListIds,
+                                userSession = userSession,
+                                syncing = myListSyncing,
+                                onSyncClick = { syncMyListFromCloud() },
+                                onRemoveClick = { toggleMyList(it.id) },
+                                onAnimeClick = { selectedAnime = it },
+                                onExploreClick = { tab = 0 },
+                                onLoginClick = { tab = 4 }
+                            )
+                            3 -> DownloadsScreen { offlineDownload = it }
+                            4 -> ProfileScreen(
+                                session = userSession,
+                                myListCount = myListIds.size,
+                                onSessionUpdated = { newSession ->
+                                    userSession = newSession
+                                    if (newSession != null) saveUserSession(context, newSession)
+                                    else clearUserSession(context)
+                                },
+                                onOpenMyList = { tab = 2 },
+                                onOpenDownloads = { tab = 3 }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/* REUSABLE COMMENTS & ADMIN REPLY SECTION */
+@Composable
+fun CommentsSection(
+    animeId: String,
+    userSession: UserSession?,
+    onLoginRequired: () -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    var comments by remember(animeId) { mutableStateOf<List<AnimeComment>>(emptyList()) }
+    var loading by remember(animeId) { mutableStateOf(true) }
+    var posting by remember { mutableStateOf(false) }
+    var commentInput by remember { mutableStateOf("") }
+    var statusMsg by remember { mutableStateOf<String?>(null) }
+    var isError by remember { mutableStateOf(false) }
+
+    fun loadComments() {
+        scope.launch {
+            loading = true
+            runCatching { fetchCommentsForAnime(animeId) }
+                .onSuccess { comments = it }
+                .onFailure { comments = emptyList() }
+            loading = false
+        }
+    }
+
+    LaunchedEffect(animeId) {
+        loadComments()
+    }
+
+    DetailSection("Comments (${comments.size})") {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(SurfaceDark)
+                .padding(12.dp)
+        ) {
+            if (userSession == null) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        "Comment karne ke liye Login karein",
+                        color = Gray,
+                        fontSize = 11.sp,
+                        modifier = Modifier.weight(1f)
+                    )
+                    SmallOutlineButton(
+                        text = "Login",
+                        onClick = onLoginRequired,
+                        selected = true
+                    )
+                }
+            } else {
+                OutlinedTextField(
+                    value = commentInput,
+                    onValueChange = { commentInput = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Write a comment as ${userSession.fullName.ifBlank { "Member" }}...", color = Gray, fontSize = 11.sp) },
+                    maxLines = 3,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = White,
+                        unfocusedTextColor = White,
+                        focusedBorderColor = AccentRed,
+                        unfocusedBorderColor = Color(0xFF2D2F3E),
+                        cursorColor = AccentRed
+                    )
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    SmallOutlineButton(
+                        text = "↻ Refresh",
+                        onClick = { loadComments() },
+                        enabled = !loading && !posting
+                    )
+                    Button(
+                        onClick = {
+                            val clean = commentInput.trim()
+                            if (clean.length < 2) {
+                                isError = true
+                                statusMsg = "Kripya comment likhein."
+                                return@Button
+                            }
+                            posting = true
+                            statusMsg = null
+                            scope.launch {
+                                try {
+                                    postAnimeComment(animeId, clean, userSession)
+                                    commentInput = ""
+                                    isError = false
+                                    statusMsg = "Comment post ho gaya!"
+                                    loadComments()
+                                } catch (e: Exception) {
+                                    isError = true
+                                    statusMsg = e.message ?: "Comment post nahi ho paya."
+                                } finally {
+                                    posting = false
+                                }
+                            }
+                        },
+                        enabled = !posting,
+                        modifier = Modifier.height(32.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentRed, contentColor = White)
+                    ) {
+                        Text(
+                            if (posting) "Posting..." else "Post Comment",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+                }
+            }
+
+            statusMsg?.let { msg ->
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    msg,
+                    color = if (isError) AccentRed else Color(0xFF4CAF50),
+                    fontSize = 10.sp
+                )
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        when {
+            loading -> Box(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 16.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(color = AccentRed, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+            }
+            comments.isEmpty() -> Box(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(11.dp))
+                    .background(SurfaceDark)
+                    .padding(16.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("Abhi koi comment nahi hai. Pehla comment aap karein!", color = Gray, fontSize = 11.sp)
+            }
+            else -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                comments.forEach { item ->
+                    val initial = (item.userName.firstOrNull() ?: 'U').uppercaseChar()
+                    val isOwnComment = userSession != null && item.userId == userSession.userId
+
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(11.dp))
+                            .background(SurfaceDark)
+                            .padding(11.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                Modifier
+                                    .size(26.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF28151E)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(initial.toString(), color = AccentRed, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(item.userName, color = White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                if (item.createdAt.isNotBlank()) {
+                                    Text(item.createdAt, color = Gray, fontSize = 9.sp)
+                                }
+                            }
+                            if (isOwnComment) {
+                                Text(
+                                    "🗑 Delete",
+                                    color = AccentRed,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier
+                                        .clickable {
+                                            scope.launch {
+                                                runCatching { deleteAnimeComment(item.id, userSession!!) }
+                                                loadComments()
+                                            }
+                                        }
+                                        .padding(horizontal = 6.dp, vertical = 3.dp)
                                 )
-                                1 -> SearchScreen(
-                                    animeList = animeList,
-                                    searchText = search,
-                                    myListIds = myListIds,
-                                    onToggleMyList = { toggleMyList(it.id) },
-                                    onSearchChange = { search = it },
-                                    onAnimeClick = { selectedAnime = it }
-                                )
-                                2 -> MyListScreen(
-                                    animeList = animeList,
-                                    myListIds = myListIds,
-                                    userSession = userSession,
-                                    syncing = myListSyncing,
-                                    onSyncClick = { syncMyListFromCloud() },
-                                    onRemoveClick = { toggleMyList(it.id) },
-                                    onAnimeClick = { selectedAnime = it },
-                                    onExploreClick = { tab = 0 },
-                                    onLoginClick = { tab = 4 }
-                                )
-                                3 -> DownloadsScreen { offlineDownload = it }
-                                4 -> ProfileScreen(
-                                    session = userSession,
-                                    myListCount = myListIds.size,
-                                    onSessionUpdated = { newSession ->
-                                        userSession = newSession
-                                        if (newSession != null) saveUserSession(context, newSession)
-                                        else clearUserSession(context)
-                                    },
-                                    onOpenMyList = { tab = 2 },
-                                    onOpenDownloads = { tab = 3 }
-                                )
+                            }
+                        }
+
+                        Spacer(Modifier.height(6.dp))
+                        Text(item.content, color = Color(0xFFE2E4EC), fontSize = 11.sp)
+
+                        // Admin Reply Box (From Admin Panel)
+                        if (item.adminReply.isNotBlank()) {
+                            Spacer(Modifier.height(8.dp))
+                            Column(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xFF1A1218))
+                                    .border(1.dp, Color(0xFF421824), RoundedCornerShape(8.dp))
+                                    .padding(9.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Surface(color = AccentRed, shape = RoundedCornerShape(4.dp)) {
+                                        Text(
+                                            "ADMIN REPLY",
+                                            color = White,
+                                            fontSize = 7.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("AniStream Official", color = Gray, fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
+                                }
+                                Spacer(Modifier.height(4.dp))
+                                Text(item.adminReply, color = White, fontSize = 11.sp)
                             }
                         }
                     }
@@ -1179,13 +1332,11 @@ fun HomeScreen(
     val series = remember(animeList) { animeList.filter { !it.animeType.equals("Movie", true) } }
     val savedContinueList = remember(animeList, myListIds) { animeList.filter { myListIds.contains(it.id) } }
 
-    // Auto-sliding Featured Carousel state (Top 6 anime)
     val featuredSlides = remember(filteredList, animeList) {
         (filteredList.ifEmpty { animeList }).take(6)
     }
     var currentSlide by remember(featuredSlides.size) { mutableIntStateOf(0) }
 
-    // Auto-advance featured anime every 4 seconds
     LaunchedEffect(featuredSlides.size, currentSlide) {
         if (featuredSlides.size > 1) {
             delay(4000L)
@@ -1925,24 +2076,18 @@ fun ProfileScreen(
             .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
         if (session == null) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                AniStreamBrandLogo(size = 54.dp, showTextInside = true)
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        if (isSignUp) "Create Account" else "Welcome Back",
-                        color = White,
-                        fontSize = 21.sp,
-                        fontWeight = FontWeight.ExtraBold
-                    )
-                    Text(
-                        if (isSignUp) "Sign up with Supabase to sync your profile & My List."
-                        else "Login to access your AniStream Hindi profile & cloud My List.",
-                        color = Gray,
-                        fontSize = 11.sp
-                    )
-                }
-            }
+            Text(
+                if (isSignUp) "Create Account" else "Welcome Back",
+                color = White,
+                fontSize = 21.sp,
+                fontWeight = FontWeight.ExtraBold
+            )
+            Text(
+                if (isSignUp) "Sign up with Supabase to sync your profile & My List."
+                else "Login to access your AniStream Hindi profile & cloud My List.",
+                color = Gray,
+                fontSize = 11.sp
+            )
             Spacer(Modifier.height(14.dp))
 
             Row(
@@ -2434,7 +2579,9 @@ fun SearchScreen(
 fun AnimeDetailsScreen(
     anime: Anime,
     isInMyList: Boolean,
+    userSession: UserSession?,
     onToggleMyList: () -> Unit,
+    onLoginRequired: () -> Unit,
     onBack: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
@@ -2519,9 +2666,12 @@ fun AnimeDetailsScreen(
     val episodeIndex = episodes.indexOfFirst { it.id == playingEpisode?.id }
     if (playingEpisode != null) {
         PlayerScreen(
+            animeId = anime.id,
             episode = playingEpisode!!,
             episodes = episodes,
             episodeIndex = episodeIndex,
+            userSession = userSession,
+            onLoginRequired = onLoginRequired,
             onBack = { playingEpisode = null },
             onEpisodeChange = { if (it in episodes.indices) playingEpisode = episodes[it] }
         )
@@ -2651,6 +2801,13 @@ fun AnimeDetailsScreen(
                 }
             }
         }
+
+        // Live Comments & Admin Replies Section on Anime Details Page
+        CommentsSection(
+            animeId = anime.id,
+            userSession = userSession,
+            onLoginRequired = onLoginRequired
+        )
     }
 }
 
@@ -2683,9 +2840,12 @@ fun EpisodeCard(episode: AnimeEpisode, selected: Boolean = false, onClick: () ->
 
 @Composable
 fun PlayerScreen(
+    animeId: String,
     episode: AnimeEpisode,
     episodes: List<AnimeEpisode>,
     episodeIndex: Int,
+    userSession: UserSession?,
+    onLoginRequired: () -> Unit,
     onBack: () -> Unit,
     onEpisodeChange: (Int) -> Unit
 ) {
@@ -2776,8 +2936,6 @@ fun PlayerScreen(
             ) {
                 Text("‹", color = White, fontSize = 24.sp, modifier = Modifier.clickable { onBack() })
                 Spacer(Modifier.width(10.dp))
-                AniStreamBrandLogo(size = 24.dp, showTextInside = false)
-                Spacer(Modifier.width(8.dp))
                 Column(Modifier.weight(1f)) {
                     Text("ANISTREAM PLAYER", color = AccentRed, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold)
                     Text("Episode ${episode.episodeNumber}", color = Gray, fontSize = 10.sp)
@@ -2887,8 +3045,16 @@ fun PlayerScreen(
                     SmallOutlineButton("← Previous", onClick = { onEpisodeChange(episodeIndex - 1) }, modifier = Modifier.weight(1f), enabled = episodeIndex > 0)
                     SmallOutlineButton("Next Episode →", onClick = { onEpisodeChange(episodeIndex + 1) }, modifier = Modifier.weight(1f), enabled = episodeIndex >= 0 && episodeIndex < episodes.lastIndex, selected = true)
                 }
-                Spacer(Modifier.height(18.dp))
+                Spacer(Modifier.height(10.dp))
             }
+
+            // Comments & Admin Reply Section inside Watch Page
+            CommentsSection(
+                animeId = animeId,
+                userSession = userSession,
+                onLoginRequired = onLoginRequired
+            )
+            Spacer(Modifier.height(18.dp))
         }
     }
 }
@@ -3889,8 +4055,6 @@ fun LocalDownloadedPlayer(download: DownloadInfo, onBack: () -> Unit) {
             ) {
                 Text("‹", color = White, fontSize = 24.sp, modifier = Modifier.clickable { onBack() })
                 Spacer(Modifier.width(10.dp))
-                AniStreamBrandLogo(size = 24.dp, showTextInside = false)
-                Spacer(Modifier.width(8.dp))
                 Column(Modifier.weight(1f)) {
                     Text("OFFLINE PLAYER", color = AccentRed, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                     Text(download.title, color = White, fontSize = 10.sp, maxLines = 1)
