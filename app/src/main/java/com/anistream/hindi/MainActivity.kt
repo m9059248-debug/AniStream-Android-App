@@ -50,10 +50,13 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -144,6 +147,158 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent { AniStreamApp() }
+    }
+}
+
+/**
+ * AniStream Hindi Official App Logo Component
+ * Automatically loads `res/drawable/app_logo.png` if present,
+ * or renders the exact glowing red squircle + play orbit logo via Canvas.
+ */
+@Composable
+fun AniStreamBrandLogo(
+    size: Dp = 34.dp,
+    showTextInside: Boolean = false,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val drawableId = remember(context) {
+        context.resources.getIdentifier("app_logo", "drawable", context.packageName)
+    }
+    val cornerRadius = (size.value * 0.24f).dp
+
+    if (drawableId != 0) {
+        Image(
+            painter = painterResource(id = drawableId),
+            contentDescription = "AniStream Hindi Logo",
+            modifier = modifier
+                .size(size)
+                .clip(RoundedCornerShape(cornerRadius)),
+            contentScale = ContentScale.Crop
+        )
+    } else {
+        Box(
+            modifier = modifier
+                .size(size)
+                .clip(RoundedCornerShape(cornerRadius))
+                .background(
+                    Brush.linearGradient(
+                        colors = listOf(
+                            Color(0xFF2B030A),
+                            Color(0xFF07070B),
+                            Color(0xFF07070B),
+                            Color(0xFF33040C)
+                        )
+                    )
+                )
+                .border(
+                    width = (size.value * 0.045f).coerceAtLeast(1.2f).dp,
+                    brush = Brush.linearGradient(
+                        colors = listOf(
+                            Color(0xFFFF2A55),
+                            Color(0xFFB70020),
+                            Color(0xFFFF1744)
+                        )
+                    ),
+                    shape = RoundedCornerShape(cornerRadius)
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Canvas(Modifier.fillMaxSize()) {
+                val w = this.size.width
+                val h = this.size.height
+
+                // Top-left & bottom-right red glossy corner ribbons
+                val topRibbon = Path().apply {
+                    moveTo(0f, 0f)
+                    lineTo(w * 0.45f, 0f)
+                    lineTo(0f, h * 0.45f)
+                    close()
+                }
+                drawPath(topRibbon, color = Color(0x66FF1744))
+
+                val bottomRibbon = Path().apply {
+                    moveTo(w, h)
+                    lineTo(w * 0.55f, h)
+                    lineTo(w, h * 0.55f)
+                    close()
+                }
+                drawPath(bottomRibbon, color = Color(0x66FF1744))
+
+                val centerY = if (showTextInside) h * 0.34f else h * 0.50f
+                val centerX = w * 0.50f
+
+                // Red Orbit Swoosh Ring around Play Icon
+                rotate(degrees = -18f, pivot = Offset(centerX, centerY)) {
+                    drawOval(
+                        color = AccentRed,
+                        topLeft = Offset(centerX - w * 0.34f, centerY - h * 0.13f),
+                        size = Size(w * 0.68f, h * 0.26f),
+                        style = Stroke(width = (w * 0.065f).coerceAtLeast(2f), cap = StrokeCap.Round)
+                    )
+                }
+
+                // Glowing White Play Triangle
+                val triSize = if (showTextInside) w * 0.28f else w * 0.38f
+                val playPath = Path().apply {
+                    moveTo(centerX - triSize * 0.38f, centerY - triSize * 0.48f)
+                    lineTo(centerX + triSize * 0.55f, centerY)
+                    lineTo(centerX - triSize * 0.38f, centerY + triSize * 0.48f)
+                    close()
+                }
+                drawPath(playPath, color = White)
+            }
+
+            if (showTextInside) {
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = (size.value * 0.11f).dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "Ani",
+                            color = White,
+                            fontSize = (size.value * 0.15f).sp,
+                            fontWeight = FontWeight.Black,
+                            fontStyle = FontStyle.Italic
+                        )
+                        Text(
+                            text = "Stream",
+                            color = AccentRed,
+                            fontSize = (size.value * 0.15f).sp,
+                            fontWeight = FontWeight.Black,
+                            fontStyle = FontStyle.Italic
+                        )
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Box(
+                            Modifier
+                                .width((size.value * 0.16f).dp)
+                                .height(2.dp)
+                                .background(AccentRed)
+                        )
+                        Text(
+                            text = "Hindi",
+                            color = White,
+                            fontSize = (size.value * 0.10f).sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontStyle = FontStyle.Italic
+                        )
+                        Box(
+                            Modifier
+                                .width((size.value * 0.16f).dp)
+                                .height(2.dp)
+                                .background(AccentRed)
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -719,6 +874,7 @@ private fun readDownloads(context: Context): List<DownloadInfo> {
 fun AniStreamApp() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    var showSplash by remember { mutableStateOf(true) }
     var tab by remember { mutableIntStateOf(0) }
     var animeList by remember { mutableStateOf<List<Anime>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
@@ -784,6 +940,8 @@ fun AniStreamApp() {
 
     LaunchedEffect(Unit) {
         loadAllAnime()
+        delay(1300L)
+        showSplash = false
     }
 
     LaunchedEffect(userSession?.accessToken) {
@@ -810,140 +968,177 @@ fun AniStreamApp() {
     val badgeLetter = (userSession?.fullName?.firstOrNull() ?: userSession?.email?.firstOrNull() ?: 'A').uppercaseChar()
 
     MaterialTheme {
-        Scaffold(
-            containerColor = Background,
-            bottomBar = {
-                if (selectedAnime == null && offlineDownload == null) {
-                    NavigationBar(containerColor = SurfaceDark, tonalElevation = 0.dp) {
-                        val labels = listOf("Home", "Explore", "My List", "Downloads", "Profile")
-                        val icons = listOf("⌂", "⌕", "♡", "↓", "♙")
-                        labels.forEachIndexed { index, label ->
-                            NavigationBarItem(
-                                selected = tab == index,
-                                onClick = { tab = index },
-                                icon = { Text(icons[index], fontSize = 18.sp) },
-                                label = { Text(label, fontSize = 9.sp, maxLines = 1) },
-                                colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = AccentRed, selectedTextColor = AccentRed,
-                                    indicatorColor = Color(0xFF281822), unselectedIconColor = Gray, unselectedTextColor = Gray
+        if (showSplash) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Background),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    AniStreamBrandLogo(size = 135.dp, showTextInside = true)
+                    Spacer(Modifier.height(18.dp))
+                    CircularProgressIndicator(
+                        color = AccentRed,
+                        modifier = Modifier.size(22.dp),
+                        strokeWidth = 2.dp
+                    )
+                }
+            }
+        } else {
+            Scaffold(
+                containerColor = Background,
+                bottomBar = {
+                    if (selectedAnime == null && offlineDownload == null) {
+                        NavigationBar(containerColor = SurfaceDark, tonalElevation = 0.dp) {
+                            val labels = listOf("Home", "Explore", "My List", "Downloads", "Profile")
+                            val icons = listOf("⌂", "⌕", "♡", "↓", "♙")
+                            labels.forEachIndexed { index, label ->
+                                NavigationBarItem(
+                                    selected = tab == index,
+                                    onClick = { tab = index },
+                                    icon = { Text(icons[index], fontSize = 18.sp) },
+                                    label = { Text(label, fontSize = 9.sp, maxLines = 1) },
+                                    colors = NavigationBarItemDefaults.colors(
+                                        selectedIconColor = AccentRed, selectedTextColor = AccentRed,
+                                        indicatorColor = Color(0xFF281822), unselectedIconColor = Gray, unselectedTextColor = Gray
+                                    )
                                 )
-                            )
+                            }
                         }
                     }
                 }
-            }
-        ) { padding ->
-            Column(Modifier.fillMaxSize().background(Background).padding(padding)) {
-                when {
-                    offlineDownload != null -> LocalDownloadedPlayer(offlineDownload!!, onBack = { offlineDownload = null })
-                    selectedAnime != null -> AnimeDetailsScreen(
-                        anime = selectedAnime!!,
-                        isInMyList = myListIds.contains(selectedAnime!!.id),
-                        onToggleMyList = { toggleMyList(selectedAnime!!.id) },
-                        onBack = { selectedAnime = null }
-                    )
-                    else -> {
-                        // Sleek Compact Top Header Bar
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("Ani", color = White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
-                            Text("Stream", color = AccentRed, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
-                            Spacer(Modifier.width(6.dp))
-                            Surface(color = SurfaceDark, shape = RoundedCornerShape(5.dp)) {
-                                Text(
-                                    "HINDI",
-                                    color = AccentRed,
-                                    fontSize = 8.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
-                                )
-                            }
-                            Spacer(Modifier.weight(1f))
-                            // Quick Search Icon
-                            Box(
+            ) { padding ->
+                Column(Modifier.fillMaxSize().background(Background).padding(padding)) {
+                    when {
+                        offlineDownload != null -> LocalDownloadedPlayer(offlineDownload!!, onBack = { offlineDownload = null })
+                        selectedAnime != null -> AnimeDetailsScreen(
+                            anime = selectedAnime!!,
+                            isInMyList = myListIds.contains(selectedAnime!!.id),
+                            onToggleMyList = { toggleMyList(selectedAnime!!.id) },
+                            onBack = { selectedAnime = null }
+                        )
+                        else -> {
+                            // Sleek Compact Top Header Bar with New App Logo
+                            Row(
                                 Modifier
-                                    .size(32.dp)
-                                    .clip(RoundedCornerShape(9.dp))
-                                    .background(SurfaceDark)
-                                    .clickable { tab = 1 },
-                                contentAlignment = Alignment.Center
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("⌕", color = White, fontSize = 16.sp)
-                            }
-                            Spacer(Modifier.width(8.dp))
-                            // Compact Profile Avatar Icon
-                            if (!userSession?.avatarUrl.isNullOrBlank()) {
-                                UserAvatarView(
-                                    avatarUrl = userSession?.avatarUrl.orEmpty(),
-                                    fallbackInitial = badgeLetter,
+                                AniStreamBrandLogo(
                                     size = 32.dp,
-                                    fontSize = 14.sp,
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(9.dp))
-                                        .border(1.dp, AccentRed, RoundedCornerShape(9.dp))
-                                        .clickable { tab = 4 }
+                                    showTextInside = false,
+                                    modifier = Modifier.clickable { tab = 0 }
                                 )
-                            } else {
+                                Spacer(Modifier.width(9.dp))
+                                Text(
+                                    "Ani",
+                                    color = White,
+                                    fontSize = 21.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontStyle = FontStyle.Italic
+                                )
+                                Text(
+                                    "Stream",
+                                    color = AccentRed,
+                                    fontSize = 21.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontStyle = FontStyle.Italic
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Surface(color = SurfaceDark, shape = RoundedCornerShape(5.dp)) {
+                                    Text(
+                                        "HINDI",
+                                        color = AccentRed,
+                                        fontSize = 8.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                    )
+                                }
+                                Spacer(Modifier.weight(1f))
+                                // Quick Search Icon
                                 Box(
                                     Modifier
                                         .size(32.dp)
                                         .clip(RoundedCornerShape(9.dp))
                                         .background(SurfaceDark)
-                                        .border(1.dp, Color(0xFF2B2D3C), RoundedCornerShape(9.dp))
-                                        .clickable { tab = 4 },
+                                        .clickable { tab = 1 },
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Text(badgeLetter.toString(), color = AccentRed, fontSize = 14.sp, fontWeight = FontWeight.Black)
+                                    Text("⌕", color = White, fontSize = 16.sp)
+                                }
+                                Spacer(Modifier.width(8.dp))
+                                // Compact Profile Avatar Icon
+                                if (!userSession?.avatarUrl.isNullOrBlank()) {
+                                    UserAvatarView(
+                                        avatarUrl = userSession?.avatarUrl.orEmpty(),
+                                        fallbackInitial = badgeLetter,
+                                        size = 32.dp,
+                                        fontSize = 14.sp,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(9.dp))
+                                            .border(1.dp, AccentRed, RoundedCornerShape(9.dp))
+                                            .clickable { tab = 4 }
+                                    )
+                                } else {
+                                    Box(
+                                        Modifier
+                                            .size(32.dp)
+                                            .clip(RoundedCornerShape(9.dp))
+                                            .background(SurfaceDark)
+                                            .border(1.dp, Color(0xFF2B2D3C), RoundedCornerShape(9.dp))
+                                            .clickable { tab = 4 },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(badgeLetter.toString(), color = AccentRed, fontSize = 14.sp, fontWeight = FontWeight.Black)
+                                    }
                                 }
                             }
-                        }
 
-                        when (tab) {
-                            0 -> HomeScreen(
-                                animeList = animeList,
-                                loading = loading,
-                                error = error,
-                                myListIds = myListIds,
-                                onRefresh = { loadAllAnime() },
-                                onToggleMyList = { toggleMyList(it.id) },
-                                onExploreClick = { tab = 1 },
-                                onAnimeClick = { selectedAnime = it }
-                            )
-                            1 -> SearchScreen(
-                                animeList = animeList,
-                                searchText = search,
-                                myListIds = myListIds,
-                                onToggleMyList = { toggleMyList(it.id) },
-                                onSearchChange = { search = it },
-                                onAnimeClick = { selectedAnime = it }
-                            )
-                            2 -> MyListScreen(
-                                animeList = animeList,
-                                myListIds = myListIds,
-                                userSession = userSession,
-                                syncing = myListSyncing,
-                                onSyncClick = { syncMyListFromCloud() },
-                                onRemoveClick = { toggleMyList(it.id) },
-                                onAnimeClick = { selectedAnime = it },
-                                onExploreClick = { tab = 0 },
-                                onLoginClick = { tab = 4 }
-                            )
-                            3 -> DownloadsScreen { offlineDownload = it }
-                            4 -> ProfileScreen(
-                                session = userSession,
-                                myListCount = myListIds.size,
-                                onSessionUpdated = { newSession ->
-                                    userSession = newSession
-                                    if (newSession != null) saveUserSession(context, newSession)
-                                    else clearUserSession(context)
-                                },
-                                onOpenMyList = { tab = 2 },
-                                onOpenDownloads = { tab = 3 }
-                            )
+                            when (tab) {
+                                0 -> HomeScreen(
+                                    animeList = animeList,
+                                    loading = loading,
+                                    error = error,
+                                    myListIds = myListIds,
+                                    onRefresh = { loadAllAnime() },
+                                    onToggleMyList = { toggleMyList(it.id) },
+                                    onExploreClick = { tab = 1 },
+                                    onAnimeClick = { selectedAnime = it }
+                                )
+                                1 -> SearchScreen(
+                                    animeList = animeList,
+                                    searchText = search,
+                                    myListIds = myListIds,
+                                    onToggleMyList = { toggleMyList(it.id) },
+                                    onSearchChange = { search = it },
+                                    onAnimeClick = { selectedAnime = it }
+                                )
+                                2 -> MyListScreen(
+                                    animeList = animeList,
+                                    myListIds = myListIds,
+                                    userSession = userSession,
+                                    syncing = myListSyncing,
+                                    onSyncClick = { syncMyListFromCloud() },
+                                    onRemoveClick = { toggleMyList(it.id) },
+                                    onAnimeClick = { selectedAnime = it },
+                                    onExploreClick = { tab = 0 },
+                                    onLoginClick = { tab = 4 }
+                                )
+                                3 -> DownloadsScreen { offlineDownload = it }
+                                4 -> ProfileScreen(
+                                    session = userSession,
+                                    myListCount = myListIds.size,
+                                    onSessionUpdated = { newSession ->
+                                        userSession = newSession
+                                        if (newSession != null) saveUserSession(context, newSession)
+                                        else clearUserSession(context)
+                                    },
+                                    onOpenMyList = { tab = 2 },
+                                    onOpenDownloads = { tab = 3 }
+                                )
+                            }
                         }
                     }
                 }
@@ -999,7 +1194,6 @@ fun HomeScreen(
     }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        // Sub-Header: "YOUR NEXT FAVORITE / Anime starts here" + Compact Explore Pill
         Row(
             Modifier
                 .fillMaxWidth()
@@ -1041,7 +1235,6 @@ fun HomeScreen(
 
         Spacer(Modifier.height(8.dp))
 
-        // Compact Horizontal Category Filter Pills
         Row(
             Modifier
                 .fillMaxWidth()
@@ -1103,7 +1296,6 @@ fun HomeScreen(
                 val isFeaturedSaved = myListIds.contains(featured.id)
                 var dragDelta by remember { mutableFloatStateOf(0f) }
 
-                // Auto-Sliding Hero Banner with Right-Side Peek & Swipe Gesture
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -1129,7 +1321,6 @@ fun HomeScreen(
                         },
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    // Main Featured Hero Card
                     Box(
                         Modifier
                             .weight(1f)
@@ -1145,7 +1336,6 @@ fun HomeScreen(
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop
                         )
-                        // Smooth dark bottom gradient overlay
                         Box(
                             Modifier
                                 .fillMaxSize()
@@ -1161,7 +1351,6 @@ fun HomeScreen(
                                 )
                         )
 
-                        // Top-Left Compact "✦ FEATURED" Badge
                         Surface(
                             color = AccentRed,
                             shape = RoundedCornerShape(7.dp),
@@ -1178,7 +1367,6 @@ fun HomeScreen(
                             )
                         }
 
-                        // Top-Right Compact My List Heart Button
                         Box(
                             Modifier
                                 .align(Alignment.TopEnd)
@@ -1197,7 +1385,6 @@ fun HomeScreen(
                             )
                         }
 
-                        // Bottom Content: Rating + Type Pills, Title, Subtitle, Compact Watch Now Button
                         Column(
                             Modifier
                                 .align(Alignment.BottomStart)
@@ -1249,7 +1436,6 @@ fun HomeScreen(
                             )
                             Spacer(Modifier.height(10.dp))
 
-                            // Compact "▶ Watch Now" Button
                             Surface(
                                 color = AccentRed,
                                 shape = RoundedCornerShape(9.dp),
@@ -1269,7 +1455,6 @@ fun HomeScreen(
                         }
                     }
 
-                    // Right-Edge Peeking Next Anime Card (Just like screenshot)
                     if (nextFeatured != null) {
                         Box(
                             Modifier
@@ -1294,7 +1479,6 @@ fun HomeScreen(
                     }
                 }
 
-                // Carousel Pagination Dots (• • ▬ • • •)
                 if (featuredSlides.size > 1) {
                     Row(
                         Modifier
@@ -1320,7 +1504,6 @@ fun HomeScreen(
 
                 Spacer(Modifier.height(12.dp))
 
-                // If user has items in My List, show "| Saved & Continue Watching" section
                 if (savedContinueList.isNotEmpty()) {
                     AnimeSection("Saved in Watchlist", savedContinueList, onAnimeClick)
                 }
@@ -1352,7 +1535,6 @@ fun AnimeSection(title: String, animeList: List<Anime>, onAnimeClick: (Anime) ->
                 .padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Vertical Accent Bar like "| Continue Watching" in screenshot
             Box(
                 Modifier
                     .width(3.dp)
@@ -1743,18 +1925,24 @@ fun ProfileScreen(
             .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
         if (session == null) {
-            Text(
-                if (isSignUp) "Create Account" else "Welcome Back",
-                color = White,
-                fontSize = 21.sp,
-                fontWeight = FontWeight.ExtraBold
-            )
-            Text(
-                if (isSignUp) "Sign up with Supabase to sync your profile & My List."
-                else "Login to access your AniStream Hindi profile & cloud My List.",
-                color = Gray,
-                fontSize = 11.sp
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                AniStreamBrandLogo(size = 54.dp, showTextInside = true)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        if (isSignUp) "Create Account" else "Welcome Back",
+                        color = White,
+                        fontSize = 21.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                    Text(
+                        if (isSignUp) "Sign up with Supabase to sync your profile & My List."
+                        else "Login to access your AniStream Hindi profile & cloud My List.",
+                        color = Gray,
+                        fontSize = 11.sp
+                    )
+                }
+            }
             Spacer(Modifier.height(14.dp))
 
             Row(
@@ -2588,6 +2776,8 @@ fun PlayerScreen(
             ) {
                 Text("‹", color = White, fontSize = 24.sp, modifier = Modifier.clickable { onBack() })
                 Spacer(Modifier.width(10.dp))
+                AniStreamBrandLogo(size = 24.dp, showTextInside = false)
+                Spacer(Modifier.width(8.dp))
                 Column(Modifier.weight(1f)) {
                     Text("ANISTREAM PLAYER", color = AccentRed, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold)
                     Text("Episode ${episode.episodeNumber}", color = Gray, fontSize = 10.sp)
@@ -3699,6 +3889,8 @@ fun LocalDownloadedPlayer(download: DownloadInfo, onBack: () -> Unit) {
             ) {
                 Text("‹", color = White, fontSize = 24.sp, modifier = Modifier.clickable { onBack() })
                 Spacer(Modifier.width(10.dp))
+                AniStreamBrandLogo(size = 24.dp, showTextInside = false)
+                Spacer(Modifier.width(8.dp))
                 Column(Modifier.weight(1f)) {
                     Text("OFFLINE PLAYER", color = AccentRed, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                     Text(download.title, color = White, fontSize = 10.sp, maxLines = 1)
@@ -3736,7 +3928,6 @@ fun LocalDownloadedPlayer(download: DownloadInfo, onBack: () -> Unit) {
     }
 }
 
-// Compact & Smaller Button Component across the whole app
 @Composable
 fun SmallOutlineButton(
     text: String,
