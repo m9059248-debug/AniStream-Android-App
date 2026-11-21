@@ -5,8 +5,10 @@
 
     <application
         android:allowBackup="false"
+        android:icon="@drawable/app_logo"
+        android:roundIcon="@drawable/app_logo"
         android:label="AniStream Hindi"
-        android:theme="@android:style/Theme.Material.Light.NoActionBar"
+        android:theme="@android:style/Theme.Material.NoActionBar"
         android:usesCleartextTraffic="false">
 
         <activity
