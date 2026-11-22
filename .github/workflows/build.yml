@@ -25,21 +25,41 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Fix Drawable Folder & Convert Logo to Valid PNG
+      - name: Generate Mipmap App Icons & Auto-Link Manifest
         run: |
           mkdir -p app/src/main/res/drawable
+          mkdir -p app/src/main/res/mipmap-mdpi
+          mkdir -p app/src/main/res/mipmap-hdpi
+          mkdir -p app/src/main/res/mipmap-xhdpi
+          mkdir -p app/src/main/res/mipmap-xxhdpi
+          mkdir -p app/src/main/res/mipmap-xxxhdpi
           rm -f app/src/main/res/drawable/*.txt
           for img in app/src/main/res/drawable/*; do
             [ -e "$img" ] || continue
             ext="${img##*.}"
             ext_lower=$(echo "$ext" | tr '[:upper:]' '[:lower:]')
             if [ "$ext_lower" != "xml" ]; then
-              ffmpeg -y -i "$img" -vf "scale=512:512:force_original_aspect_ratio=increase,crop=512:512" app/src/main/res/drawable/fixed_logo.png || cp "$img" app/src/main/res/drawable/fixed_logo.png
+              ffmpeg -y -i "$img" -vf "scale=192:192" -pix_fmt rgba app/src/main/res/drawable/fixed_logo.png || cp "$img" app/src/main/res/drawable/fixed_logo.png
               rm -f "$img"
               mv app/src/main/res/drawable/fixed_logo.png app/src/main/res/drawable/app_logo.png
+              ffmpeg -y -i app/src/main/res/drawable/app_logo.png -vf "scale=48:48" -pix_fmt rgba app/src/main/res/mipmap-mdpi/app_logo.png
+              ffmpeg -y -i app/src/main/res/drawable/app_logo.png -vf "scale=72:72" -pix_fmt rgba app/src/main/res/mipmap-hdpi/app_logo.png
+              ffmpeg -y -i app/src/main/res/drawable/app_logo.png -vf "scale=96:96" -pix_fmt rgba app/src/main/res/mipmap-xhdpi/app_logo.png
+              ffmpeg -y -i app/src/main/res/drawable/app_logo.png -vf "scale=144:144" -pix_fmt rgba app/src/main/res/mipmap-xxhdpi/app_logo.png
+              ffmpeg -y -i app/src/main/res/drawable/app_logo.png -vf "scale=192:192" -pix_fmt rgba app/src/main/res/mipmap-xxxhdpi/app_logo.png
               break
             fi
           done
+          python3 -c '
+          import re, pathlib
+          p = pathlib.Path("app/src/main/AndroidManifest.xml")
+          if p.exists():
+              txt = p.read_text()
+              txt = re.sub(r"\s*android:icon=\"[^\"]*\"", "", txt)
+              txt = re.sub(r"\s*android:roundIcon=\"[^\"]*\"", "", txt)
+              txt = txt.replace("<application", "<application\n        android:icon=\"@mipmap/app_logo\"\n        android:roundIcon=\"@mipmap/app_logo\"", 1)
+              p.write_text(txt)
+          '
 
       - name: Setup Fixed Signing Key
         run: |
@@ -82,8 +102,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          name: AniStream Hindi Latest Official APK
+          name: AniStream Hindi Latest Official APK (v1.1)
           files: AniStream-Hindi.apk
           overwrite_files: true
+          make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
