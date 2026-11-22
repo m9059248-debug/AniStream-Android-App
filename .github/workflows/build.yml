@@ -27,29 +27,60 @@ jobs:
 
       - name: Generate Mipmap App Icons & Auto-Link Manifest
         run: |
-          mkdir -p app/src/main/res/drawable
-          mkdir -p app/src/main/res/mipmap-mdpi
-          mkdir -p app/src/main/res/mipmap-hdpi
-          mkdir -p app/src/main/res/mipmap-xhdpi
-          mkdir -p app/src/main/res/mipmap-xxhdpi
-          mkdir -p app/src/main/res/mipmap-xxxhdpi
-          rm -f app/src/main/res/drawable/*.txt
-          for img in app/src/main/res/drawable/*; do
-            [ -e "$img" ] || continue
-            ext="${img##*.}"
-            ext_lower=$(echo "$ext" | tr '[:upper:]' '[:lower:]')
-            if [ "$ext_lower" != "xml" ]; then
-              ffmpeg -y -i "$img" -vf "scale=192:192" -pix_fmt rgba app/src/main/res/drawable/fixed_logo.png || cp "$img" app/src/main/res/drawable/fixed_logo.png
-              rm -f "$img"
-              mv app/src/main/res/drawable/fixed_logo.png app/src/main/res/drawable/app_logo.png
-              ffmpeg -y -i app/src/main/res/drawable/app_logo.png -vf "scale=48:48" -pix_fmt rgba app/src/main/res/mipmap-mdpi/app_logo.png
-              ffmpeg -y -i app/src/main/res/drawable/app_logo.png -vf "scale=72:72" -pix_fmt rgba app/src/main/res/mipmap-hdpi/app_logo.png
-              ffmpeg -y -i app/src/main/res/drawable/app_logo.png -vf "scale=96:96" -pix_fmt rgba app/src/main/res/mipmap-xhdpi/app_logo.png
-              ffmpeg -y -i app/src/main/res/drawable/app_logo.png -vf "scale=144:144" -pix_fmt rgba app/src/main/res/mipmap-xxhdpi/app_logo.png
-              ffmpeg -y -i app/src/main/res/drawable/app_logo.png -vf "scale=192:192" -pix_fmt rgba app/src/main/res/mipmap-xxxhdpi/app_logo.png
-              break
-            fi
-          done
+          cat << 'EOF' > ResizeLogo.java
+          import java.awt.Graphics2D;
+          import java.awt.RenderingHints;
+          import java.awt.image.BufferedImage;
+          import java.io.File;
+          import java.nio.file.Files;
+          import java.nio.file.StandardCopyOption;
+          import javax.imageio.ImageIO;
+
+          public class ResizeLogo {
+              public static void main(String[] args) throws Exception {
+                  System.setProperty("java.awt.headless", "true");
+                  File drawDir = new File("app/src/main/res/drawable");
+                  drawDir.mkdirs();
+                  File src = null;
+                  File[] list = drawDir.listFiles();
+                  if (list != null) {
+                      for (File f : list) {
+                          if (f.getName().endsWith(".txt")) {
+                              f.delete();
+                          } else if (f.isFile() && !f.getName().toLowerCase().endsWith(".xml")) {
+                              src = f;
+                          }
+                      }
+                  }
+                  if (src == null) return;
+                  BufferedImage img = ImageIO.read(src);
+                  File mainLogo = new File(drawDir, "app_logo.png");
+                  if (!src.equals(mainLogo)) {
+                      Files.move(src.toPath(), mainLogo.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                  }
+                  String[] folders = {"drawable", "mipmap-mdpi", "mipmap-hdpi", "mipmap-xhdpi", "mipmap-xxhdpi", "mipmap-xxxhdpi"};
+                  int[] sizes = {192, 48, 72, 96, 144, 192};
+                  for (int i = 0; i < folders.length; i++) {
+                      File dir = new File("app/src/main/res/" + folders[i]);
+                      dir.mkdirs();
+                      File out = new File(dir, "app_logo.png");
+                      if (img != null) {
+                          BufferedImage scaled = new BufferedImage(sizes[i], sizes[i], BufferedImage.TYPE_INT_ARGB);
+                          Graphics2D g = scaled.createGraphics();
+                          g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+                          g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                          g.drawImage(img, 0, 0, sizes[i], sizes[i], null);
+                          g.dispose();
+                          ImageIO.write(scaled, "png", out);
+                      } else if (!out.equals(mainLogo)) {
+                          Files.copy(mainLogo.toPath(), out.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                      }
+                  }
+              }
+          }
+          EOF
+          java ResizeLogo.java
+          rm -f ResizeLogo.java
           python3 -c '
           import re, pathlib
           p = pathlib.Path("app/src/main/AndroidManifest.xml")
