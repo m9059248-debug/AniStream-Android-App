@@ -1,6 +1,11 @@
 package com.anistream.hindi
 
 import android.app.Activity
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.ui.graphics.StrokeJoin
@@ -1069,21 +1074,29 @@ fun AniStreamApp() {
 
     val badgeLetter = (userSession?.fullName?.firstOrNull() ?: userSession?.email?.firstOrNull() ?: 'A').uppercaseChar()
     val displayUserName = userSession?.fullName?.takeIf { it.isNotBlank() }?.take(10) ?: "Login"
+    val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
 
     MaterialTheme {
         Scaffold(
             containerColor = Background,
             bottomBar = {
-                if (selectedAnime == null && offlineDownload == null) {
+                if (selectedAnime == null && offlineDownload == null && !(tab == 5 && imeVisible)) {
                     NavigationBar(containerColor = SurfaceDark, tonalElevation = 0.dp) {
-                        val labels = listOf("Home", "Search", "My List", "Downloads", "Profile")
-                        val icons = listOf("⌂", "⌕", "♡", "↓", "♙")
-                        labels.forEachIndexed { index, label ->
+                        // (label, icon, tab number) — Profile ka tab number 4 hi rahta hai, Chat ka 5
+                        val navItems = listOf(
+                            Triple("Home", "⌂", 0),
+                            Triple("Search", "⌕", 1),
+                            Triple("My List", "♡", 2),
+                            Triple("Downloads", "↓", 3),
+                            Triple("Chat", "💬", 5),
+                            Triple("Profile", "♙", 4)
+                        )
+                        navItems.forEach { (label, icon, target) ->
                             NavigationBarItem(
-                                selected = tab == index,
-                                onClick = { tab = index },
-                                icon = { Text(icons[index], fontSize = 19.sp) },
-                                label = { Text(label, fontSize = 10.sp, maxLines = 1) },
+                                selected = tab == target,
+                                onClick = { tab = target },
+                                icon = { Text(icon, fontSize = 18.sp) },
+                                label = { Text(label, fontSize = 9.5.sp, maxLines = 1) },
                                 colors = NavigationBarItemDefaults.colors(
                                     selectedIconColor = AccentRed, selectedTextColor = AccentRed,
                                     indicatorColor = Color(0xFF281822), unselectedIconColor = Gray, unselectedTextColor = Gray
@@ -1244,6 +1257,10 @@ fun AniStreamApp() {
                                 },
                                 onOpenMyList = { tab = 2 },
                                 onOpenDownloads = { tab = 3 }
+                            )
+                            5 -> ChatScreen(
+                                session = userSession,
+                                onLoginClick = { tab = 4 }
                             )
                         }
                     }
@@ -3210,6 +3227,290 @@ private fun SupportTile(
         contentAlignment = Alignment.Center,
         content = content
     )
+}
+
+/* ================= COMMUNITY CHAT ================= */
+data class ChatMessage(
+    val id: String,
+    val userId: String,
+    val name: String,
+    val username: String,
+    val message: String,
+    val createdAt: String
+)
+
+private suspend fun fetchChatMessages(session: UserSession): List<ChatMessage> = withContext(Dispatchers.IO) {
+    val url = "$SUPABASE_URL/rest/v1/chat_messages?select=id,user_id,user_name,username,message,created_at&order=created_at.desc&limit=80"
+    val res = request(url, method = "GET", supabase = true, bearerToken = session.accessToken)
+    val arr = JSONArray(res)
+    (0 until arr.length()).map { i ->
+        val obj = arr.getJSONObject(i)
+        fun str(key: String) = obj.optString(key).takeUnless { it == "null" }.orEmpty()
+        ChatMessage(
+            id = str("id"),
+            userId = str("user_id"),
+            name = str("user_name").ifBlank { "Anime Fan" },
+            username = str("username"),
+            message = str("message"),
+            createdAt = str("created_at")
+        )
+    }.reversed()
+}
+
+private suspend fun sendChatMessage(session: UserSession, text: String) = withContext(Dispatchers.IO) {
+    val payload = JSONObject().apply {
+        put("user_id", session.userId)
+        put("message", text.trim())
+    }
+    request(
+        "$SUPABASE_URL/rest/v1/chat_messages",
+        method = "POST",
+        body = payload.toString(),
+        supabase = true,
+        bearerToken = session.accessToken,
+        extraHeaders = mapOf("Prefer" to "return=minimal")
+    )
+}
+
+private fun formatChatTime(iso: String): String = runCatching {
+    val parser = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).apply {
+        timeZone = java.util.TimeZone.getTimeZone("UTC")
+    }
+    val date = parser.parse(iso.take(19)) ?: return@runCatching ""
+    java.text.SimpleDateFormat("hh:mm a", java.util.Locale.getDefault()).format(date)
+}.getOrDefault("")
+
+@Composable
+fun ChatScreen(session: UserSession?, onLoginClick: () -> Unit) {
+    if (session == null) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(24.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text("💬", fontSize = 42.sp)
+            Spacer(Modifier.height(12.dp))
+            Text("Community Chat", color = White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Chat mein shamil hone ke liye pehle login karein.",
+                color = Gray,
+                fontSize = 12.sp,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(18.dp))
+            SmallOutlineButton(
+                text = "Login / Sign Up",
+                onClick = onLoginClick,
+                modifier = Modifier.fillMaxWidth(0.7f),
+                selected = true
+            )
+        }
+    } else {
+        ChatRoom(session)
+    }
+}
+
+@Composable
+private fun ChatRoom(session: UserSession) {
+    var messages by remember { mutableStateOf<List<ChatMessage>>(emptyList()) }
+    var input by remember { mutableStateOf("") }
+    var sending by remember { mutableStateOf(false) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+    var sendError by remember { mutableStateOf<String?>(null) }
+    var firstLoadDone by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+
+    // Is page par rehne tak har 3 second mein naye messages aate rahenge
+    LaunchedEffect(session.accessToken) {
+        while (true) {
+            try {
+                messages = fetchChatMessages(session)
+                loadError = null
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                loadError = e.message ?: "Messages load nahi ho paaye."
+            }
+            firstLoadDone = true
+            delay(3000)
+        }
+    }
+
+    LaunchedEffect(messages.lastOrNull()?.id) {
+        if (messages.isEmpty()) return@LaunchedEffect
+        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+        val nearBottom = lastVisible >= messages.lastIndex - 3
+        val mine = messages.last().userId == session.userId
+        if (nearBottom || mine || lastVisible == -1) listState.scrollToItem(messages.lastIndex)
+    }
+
+    fun send() {
+        val text = input.trim()
+        if (text.isEmpty() || sending) return
+        sending = true
+        sendError = null
+        scope.launch {
+            try {
+                sendChatMessage(session, text)
+                input = ""
+                messages = fetchChatMessages(session)
+            } catch (e: Exception) {
+                val raw = e.message ?: "Message nahi gaya."
+                sendError = if (raw.contains("row-level security", ignoreCase = true)) {
+                    "Aapko chat se block kar diya gaya hai."
+                } else raw
+            } finally {
+                sending = false
+            }
+        }
+    }
+
+    Column(Modifier.fillMaxSize().imePadding()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                Modifier
+                    .width(3.dp)
+                    .height(30.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(AccentRed)
+            )
+            Spacer(Modifier.width(9.dp))
+            Column {
+                Text("Community Chat", color = White, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+                Text("Sabhi members ke saath baat karein", color = Gray, fontSize = 10.5.sp)
+            }
+        }
+
+        loadError?.let {
+            Text(it, color = AccentRed, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 14.dp, vertical = 2.dp))
+        }
+
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            when {
+                !firstLoadDone -> Text("Loading...", color = Gray, fontSize = 12.sp, modifier = Modifier.align(Alignment.Center))
+                messages.isEmpty() -> Text(
+                    "Abhi koi message nahi hai. Pehla message aap bhejein!",
+                    color = Gray,
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.align(Alignment.Center).padding(24.dp)
+                )
+                else -> LazyColumn(
+                    state = listState,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    items(messages, key = { it.id }) { msg ->
+                        ChatBubble(msg, mine = msg.userId == session.userId)
+                    }
+                }
+            }
+        }
+
+        sendError?.let {
+            Text(it, color = AccentRed, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 14.dp, vertical = 2.dp))
+        }
+
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF0B0D13))
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(
+                value = input,
+                onValueChange = { input = it.take(500) },
+                modifier = Modifier.weight(1f),
+                placeholder = { Text("Message likhein...", color = Gray, fontSize = 12.sp) },
+                maxLines = 4,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = White,
+                    unfocusedTextColor = White,
+                    focusedBorderColor = AccentRed,
+                    unfocusedBorderColor = Color(0xFF3E4150),
+                    cursorColor = AccentRed
+                )
+            )
+            Spacer(Modifier.width(8.dp))
+            SmallOutlineButton(
+                text = if (sending) "..." else "Send",
+                onClick = { send() },
+                enabled = !sending && input.isNotBlank(),
+                selected = true
+            )
+        }
+    }
+}
+
+@Composable
+private fun ChatBubble(msg: ChatMessage, mine: Boolean) {
+    val palette = listOf(
+        Color(0xFF7DD3FC), Color(0xFFFCA5A5), Color(0xFF86EFAC),
+        Color(0xFFFDE68A), Color(0xFFC4B5FD), Color(0xFFF9A8D4)
+    )
+    val nameColor = palette[(msg.userId.hashCode() and 0x7fffffff) % palette.size]
+
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
+        verticalAlignment = Alignment.Top
+    ) {
+        if (!mine) {
+            Box(
+                Modifier
+                    .size(30.dp)
+                    .clip(CircleShape)
+                    .background(nameColor.copy(alpha = 0.25f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    msg.name.firstOrNull()?.uppercaseChar()?.toString() ?: "A",
+                    color = nameColor,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Black
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+        }
+        Column(
+            Modifier
+                .widthIn(max = 280.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(if (mine) Color(0xFF3A1522) else SurfaceDark)
+                .padding(horizontal = 11.dp, vertical = 8.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    if (mine) "You" else msg.name,
+                    color = nameColor,
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                if (!mine && msg.username.isNotBlank()) {
+                    Spacer(Modifier.width(5.dp))
+                    Text("@${msg.username}", color = Gray, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(formatChatTime(msg.createdAt), color = Gray, fontSize = 9.5.sp)
+            }
+            Spacer(Modifier.height(3.dp))
+            Text(msg.message, color = White, fontSize = 13.sp)
+        }
+    }
 }
 
 @Composable
