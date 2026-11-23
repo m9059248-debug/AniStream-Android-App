@@ -3,6 +3,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("com.google.gms.google-services") version "4.4.2"
 }
 
 android {
@@ -56,6 +57,10 @@ dependencies {
 
     // HLS streaming support (.m3u8)
     implementation("androidx.media3:media3-exoplayer-hls:1.5.1")
+
+    // Firebase push notifications
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+    implementation("com.google.firebase:firebase-messaging")
 
     // Debug tools
     debugImplementation("androidx.compose.ui:ui-tooling")
