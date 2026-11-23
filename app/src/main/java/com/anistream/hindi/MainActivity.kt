@@ -1,4 +1,413 @@
-MainActivity.kt  animeId)
+package com.anistream.hindi
+
+import android.app.Activity
+import android.app.DownloadManager
+import android.content.Context
+import android.content.pm.ActivityInfo
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import android.os.Bundle
+import android.os.Environment
+import android.util.Base64
+import android.view.GestureDetector
+import android.view.MotionEvent
+import android.view.ViewGroup
+import android.view.WindowManager
+import android.webkit.WebChromeClient
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
+import coil.compose.AsyncImage
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.ByteArrayOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.Locale
+
+private const val SUPABASE_URL = "https://cyftkgouolxcverswvpv.supabase.co"
+private const val SUPABASE_KEY = "sb_publishable_h-Alm01lWCWvvlWcW-Uqyg_iAub4QH3"
+private const val AUTH_PREFS = "anistream_auth_prefs"
+private const val MY_LIST_PREFS = "anistream_my_list_prefs"
+private const val DOWNLOAD_PREFS = "anistream_download_prefs"
+
+private val Background = Color(0xFF08090D)
+private val SurfaceDark = Color(0xFF12141C)
+private val CardDark = Color(0xFF151822)
+private val AccentRed = Color(0xFFFF1744)
+private val OngoingGreen = Color(0xFF00C853)
+private val SeekBlue = Color(0xFF5AB4FF)
+private val White = Color.White
+private val Gray = Color(0xFF999BA5)
+
+private val PRESET_ANIME_AVATARS = listOf(
+    "https://api.dicebear.com/9.x/adventurer/png?seed=Obito&backgroundColor=b6e3f4",
+    "https://api.dicebear.com/9.x/adventurer/png?seed=Gojo&backgroundColor=c0aede",
+    "https://api.dicebear.com/9.x/adventurer/png?seed=Naruto&backgroundColor=ffd5dc",
+    "https://api.dicebear.com/9.x/adventurer/png?seed=Luffy&backgroundColor=ffdfbf",
+    "https://api.dicebear.com/9.x/adventurer/png?seed=Jinwoo&backgroundColor=d1d4f9",
+    "https://api.dicebear.com/9.x/adventurer/png?seed=Tanjiro&backgroundColor=b6e3f4",
+    "https://api.dicebear.com/9.x/adventurer/png?seed=Goku&backgroundColor=ffdfbf",
+    "https://api.dicebear.com/9.x/adventurer/png?seed=Nezuko&backgroundColor=ffd5dc"
+)
+
+private val DEFAULT_GENRES = listOf(
+    "All", "Action", "Adventure", "Anime Movie", "Comedy", "Dark Fantasy",
+    "Drama", "Fantasy", "Historical", "Horror", "Magic", "Mystery", "Romance", "Sci-Fi", "Supernatural"
+)
+
+private val animeDetailsCache = mutableMapOf<String, AnimeDetails>()
+private val seasonsCache = mutableMapOf<String, List<AnimeSeason>>()
+private val episodesCache = mutableMapOf<String, List<AnimeEpisode>>()
+private val videoServersCache = mutableMapOf<String, List<VideoServer>>()
+
+data class Anime(
+    val id: String,
+    val title: String,
+    val posterUrl: String,
+    val bannerUrl: String,
+    val description: String,
+    val animeType: String,
+    val status: String = "ongoing",
+    val season: String = "TV",
+    val language: String = "Hindi",
+    val genres: List<String> = emptyList()
+)
+data class AnimeSeason(val id: String, val animeId: String, val seasonNumber: Int, val title: String)
+data class AnimeEpisode(val id: String, val episodeNumber: Int, val title: String, val description: String)
+data class VideoServer(val id: String, val episodeId: String, val serverName: String, val videoUrl: String, val downloadUrl: String, val quality: String, val language: String)
+data class CharacterInfo(val name: String, val image: String, val role: String)
+data class AnimeDetails(
+    val englishTitle: String, val japaneseTitle: String, val description: String,
+    val banner: String, val genres: List<String>, val year: String, val episodes: String,
+    val rating: String, val status: String, val studio: String, val characters: List<CharacterInfo>
+)
+data class DownloadInfo(
+    val id: Long,
+    val title: String,
+    val status: String,
+    val progress: Int,
+    val localUri: String = "",
+    val sizeText: String = "",
+    val sourceUrl: String = ""
+)
+data class UserSession(
+    val userId: String,
+    val email: String,
+    val fullName: String,
+    val accessToken: String,
+    val createdAt: String,
+    val avatarUrl: String = ""
+)
+data class AnimeComment(
+    val id: String,
+    val animeId: String,
+    val userId: String,
+    val userName: String,
+    val content: String,
+    val adminReply: String,
+    val createdAt: String
+)
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent { AniStreamApp() }
+    }
+}
+
+private fun request(
+    url: String,
+    method: String = "GET",
+    body: String? = null,
+    supabase: Boolean = false,
+    bearerToken: String? = null,
+    extraHeaders: Map<String, String> = emptyMap()
+): String {
+    val connection = URL(url).openConnection() as HttpURLConnection
+    try {
+        connection.requestMethod = method
+        connection.connectTimeout = 12000
+        connection.readTimeout = 15000
+        connection.setRequestProperty("Accept", "application/json")
+        if (supabase) {
+            connection.setRequestProperty("apikey", SUPABASE_KEY)
+            connection.setRequestProperty("Authorization", "Bearer ${bearerToken ?: SUPABASE_KEY}")
+        }
+        extraHeaders.forEach { (k, v) -> connection.setRequestProperty(k, v) }
+        if (body != null) {
+            connection.doOutput = true
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+        }
+        val code = connection.responseCode
+        val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+        val result = stream?.bufferedReader()?.use { it.readText() } ?: ""
+        if (code !in 200..299) {
+            val cleanError = runCatching {
+                val obj = JSONObject(result)
+                obj.optString("msg").ifBlank {
+                    obj.optString("error_description").ifBlank {
+                        obj.optString("message").ifBlank { obj.optString("error") }
+                    }
+                }
+            }.getOrNull()?.takeIf { it.isNotBlank() } ?: "Server error $code: $result"
+            throw Exception(cleanError)
+        }
+        return result
+    } finally {
+        connection.disconnect()
+    }
+}
+
+private fun saveUserSession(context: Context, session: UserSession) {
+    val prefs = context.getSharedPreferences(AUTH_PREFS, Context.MODE_PRIVATE)
+    val finalAvatar = session.avatarUrl.ifBlank { prefs.getString("avatar_backup_${session.userId}", "").orEmpty() }
+    prefs.edit()
+        .putString("user_id", session.userId)
+        .putString("email", session.email)
+        .putString("full_name", session.fullName)
+        .putString("access_token", session.accessToken)
+        .putString("created_at", session.createdAt)
+        .putString("avatar_url", finalAvatar)
+        .putString("avatar_backup_${session.userId}", finalAvatar)
+        .apply()
+}
+
+private fun loadUserSession(context: Context): UserSession? {
+    val prefs = context.getSharedPreferences(AUTH_PREFS, Context.MODE_PRIVATE)
+    val token = prefs.getString("access_token", null)?.takeIf { it.isNotBlank() } ?: return null
+    val email = prefs.getString("email", "").orEmpty()
+    val userId = prefs.getString("user_id", "").orEmpty()
+    val fullName = prefs.getString("full_name", "").orEmpty()
+    val createdAt = prefs.getString("created_at", "").orEmpty()
+    val avatarUrl = prefs.getString("avatar_url", "").orEmpty()
+        .ifBlank { prefs.getString("avatar_backup_$userId", "").orEmpty() }
+    return UserSession(userId, email, fullName, token, createdAt, avatarUrl)
+}
+
+private fun clearUserSession(context: Context) {
+    val prefs = context.getSharedPreferences(AUTH_PREFS, Context.MODE_PRIVATE)
+    prefs.edit()
+        .remove("user_id")
+        .remove("email")
+        .remove("full_name")
+        .remove("access_token")
+        .remove("created_at")
+        .remove("avatar_url")
+        .apply()
+}
+
+private fun uriToBase64Avatar(context: Context, uri: Uri): String? {
+    return runCatching {
+        val inputStream = context.contentResolver.openInputStream(uri) ?: return null
+        val original = BitmapFactory.decodeStream(inputStream)
+        inputStream.close()
+        if (original == null) return null
+
+        val minSide = minOf(original.width, original.height)
+        val cropX = (original.width - minSide) / 2
+        val cropY = (original.height - minSide) / 2
+        val square = Bitmap.createBitmap(original, cropX, cropY, minSide, minSide)
+        val scaled = Bitmap.createScaledBitmap(square, 180, 180, true)
+
+        val output = ByteArrayOutputStream()
+        scaled.compress(Bitmap.CompressFormat.JPEG, 82, output)
+        val base64 = Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
+        "data:image/jpeg;base64,$base64"
+    }.getOrNull()
+}
+
+private fun decodeBase64ToBitmap(dataUri: String): Bitmap? {
+    return runCatching {
+        val cleanBase64 = dataUri.substringAfter("base64,", "")
+        if (cleanBase64.isBlank()) return null
+        val bytes = Base64.decode(cleanBase64, Base64.DEFAULT)
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+    }.getOrNull()
+}
+
+@Composable
+fun UserAvatarView(
+    avatarUrl: String,
+    fallbackInitial: Char,
+    size: Dp,
+    fontSize: TextUnit,
+    modifier: Modifier = Modifier
+) {
+    val base64Bitmap = remember(avatarUrl) {
+        if (avatarUrl.startsWith("data:image")) decodeBase64ToBitmap(avatarUrl) else null
+    }
+
+    Box(
+        modifier = modifier
+            .size(size)
+            .background(AccentRed),
+        contentAlignment = Alignment.Center
+    ) {
+        when {
+            base64Bitmap != null -> {
+                Image(
+                    bitmap = base64Bitmap.asImageBitmap(),
+                    contentDescription = "Profile Photo",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            }
+            avatarUrl.startsWith("http://") || avatarUrl.startsWith("https://") || avatarUrl.startsWith("content://") -> {
+                AsyncImage(
+                    model = avatarUrl,
+                    contentDescription = "Profile Photo",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            }
+            else -> {
+                Text(
+                    text = fallbackInitial.toString(),
+                    color = White,
+                    fontSize = fontSize,
+                    fontWeight = FontWeight.Black
+                )
+            }
+        }
+    }
+}
+
+private fun myListKey(userId: String?): String =
+    if (userId.isNullOrBlank()) "guest_my_list" else "user_my_list_$userId"
+
+private fun loadLocalMyList(context: Context, userId: String?): Set<String> {
+    val prefs = context.getSharedPreferences(MY_LIST_PREFS, Context.MODE_PRIVATE)
+    return prefs.getStringSet(myListKey(userId), emptySet())?.toSet() ?: emptySet()
+}
+
+private fun saveLocalMyList(context: Context, userId: String?, ids: Set<String>) {
+    context.getSharedPreferences(MY_LIST_PREFS, Context.MODE_PRIVATE).edit()
+        .putStringSet(myListKey(userId), ids)
+        .apply()
+}
+
+private suspend fun supabaseFetchMyList(session: UserSession): Set<String> = withContext(Dispatchers.IO) {
+    val combined = mutableSetOf<String>()
+    runCatching {
+        val url = "$SUPABASE_URL/rest/v1/my_list?select=anime_id&user_id=eq.${Uri.encode(session.userId)}&order=created_at.desc"
+        val res = request(url, method = "GET", supabase = true, bearerToken = session.accessToken)
+        val arr = JSONArray(res)
+        for (i in 0 until arr.length()) {
+            val id = arr.getJSONObject(i).optString("anime_id")
+            if (id.isNotBlank() && id != "null") combined.add(id)
+        }
+    }
+    runCatching {
+        val res = request("$SUPABASE_URL/auth/v1/user", method = "GET", supabase = true, bearerToken = session.accessToken)
+        val userObj = JSONObject(res)
+        val metaList = userObj.optJSONObject("user_metadata")?.optJSONArray("my_list")
+        if (metaList != null) {
+            for (i in 0 until metaList.length()) {
+                val id = metaList.optString(i)
+                if (id.isNotBlank() && id != "null") combined.add(id)
+            }
+        }
+    }
+    combined
+}
+
+private suspend fun supabaseSyncMyListMetadata(session: UserSession, allIds: Set<String>) = withContext(Dispatchers.IO) {
+    runCatching {
+        val body = JSONObject().apply {
+            put("data", JSONObject().put("my_list", JSONArray(allIds.toList())))
+        }
+        request(
+            "$SUPABASE_URL/auth/v1/user",
+            method = "PUT",
+            body = body.toString(),
+            supabase = true,
+            bearerToken = session.accessToken
+        )
+    }
+}
+
+private suspend fun supabaseUpdateAvatar(session: UserSession, newAvatarUrl: String): UserSession = withContext(Dispatchers.IO) {
+    val body = JSONObject().apply {
+        put("data", JSONObject().put("avatar_url", newAvatarUrl))
+    }
+    val res = request(
+        "$SUPABASE_URL/auth/v1/user",
+        method = "PUT",
+        body = body.toString(),
+        supabase = true,
+        bearerToken = session.accessToken
+    )
+    parseUserSession(JSONObject(res), fallbackToken = session.accessToken, fallbackAvatar = newAvatarUrl)
+}
+
+private suspend fun supabaseAddToMyList(session: UserSession, animeId: String, allIds: Set<String>) = withContext(Dispatchers.IO) {
+    runCatching {
+        val payload = JSONObject().apply {
+            put("user_id", session.userId)
+            put("anime_id", animeId)
         }
         request(
             "$SUPABASE_URL/rest/v1/my_list",
