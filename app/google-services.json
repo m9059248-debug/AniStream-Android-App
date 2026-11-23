@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "323989949125",
+    "project_id": "anistream-ffab6",
+    "storage_bucket": "anistream-ffab6.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:323989949125:android:f965cb1cbd48f01877beac",
+        "android_client_info": {
+          "package_name": "com.anistream.hindi"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBF0g2qHRezEp8fclMC-v33apjyrDk8vkQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
