@@ -1,6 +1,9 @@
 package com.anistream.hindi
 
 import android.app.Activity
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.ui.graphics.StrokeJoin
 import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -3045,17 +3048,124 @@ fun SupportSection() {
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(15.dp))
+            .clip(RoundedCornerShape(16.dp))
             .background(SurfaceDark)
-            .padding(15.dp)
+            .border(1.dp, Color(0xFF2D2F3E), RoundedCornerShape(16.dp))
+            .padding(horizontal = 14.dp, vertical = 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text("SUPPORT", color = AccentRed, fontSize = 10.5.sp, fontWeight = FontWeight.ExtraBold)
-        Spacer(Modifier.height(4.dp))
-        Text("Koi problem ya sawal ho to hamse sampark karein:", color = Gray, fontSize = 11.sp)
-        Spacer(Modifier.height(10.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(9.dp), modifier = Modifier.fillMaxWidth()) {
-            SmallOutlineButton(
-                text = "Gmail",
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .width(3.dp)
+                    .height(14.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(AccentRed)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text("SUPPORT", color = White, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.5.sp)
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Instagram
+            SupportTile(
+                background = Brush.linearGradient(
+                    colors = listOf(
+                        Color(0xFFFEDA75), Color(0xFFFA7E1E), Color(0xFFD62976),
+                        Color(0xFF962FBF), Color(0xFF4F5BD5)
+                    ),
+                    start = Offset(0f, Float.POSITIVE_INFINITY),
+                    end = Offset(Float.POSITIVE_INFINITY, 0f)
+                ),
+                onClick = { openUrl(SUPPORT_INSTAGRAM_URL) }
+            ) {
+                Canvas(Modifier.fillMaxSize()) {
+                    val u = size.minDimension / 24f
+                    drawRoundRect(
+                        color = Color.White,
+                        topLeft = Offset(4.5f * u, 4.5f * u),
+                        size = Size(15f * u, 15f * u),
+                        cornerRadius = CornerRadius(4.5f * u, 4.5f * u),
+                        style = Stroke(width = 1.8f * u)
+                    )
+                    drawCircle(
+                        color = Color.White,
+                        radius = 3.6f * u,
+                        center = Offset(12f * u, 12f * u),
+                        style = Stroke(width = 1.8f * u)
+                    )
+                    drawCircle(
+                        color = Color.White,
+                        radius = 1.0f * u,
+                        center = Offset(16.3f * u, 7.7f * u)
+                    )
+                }
+            }
+
+            // WhatsApp
+            SupportTile(
+                background = SolidColor(Color(0xFF25D366)),
+                onClick = { openUrl(SUPPORT_WHATSAPP_URL) }
+            ) {
+                Canvas(Modifier.fillMaxSize()) {
+                    val u = size.minDimension / 24f
+                    drawCircle(
+                        color = Color.White,
+                        radius = 7.4f * u,
+                        center = Offset(12f * u, 11.6f * u),
+                        style = Stroke(width = 1.9f * u)
+                    )
+                    val tail = androidx.compose.ui.graphics.Path().apply {
+                        moveTo(4.6f * u, 19.6f * u)
+                        lineTo(5.9f * u, 14.8f * u)
+                        lineTo(9.4f * u, 18.0f * u)
+                        close()
+                    }
+                    drawPath(tail, Color.White)
+                }
+                Icon(
+                    imageVector = Icons.Filled.Call,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(15.dp)
+                )
+            }
+
+            // Telegram
+            SupportTile(
+                background = SolidColor(Color(0xFF229ED9)),
+                onClick = { openUrl(SUPPORT_TELEGRAM_URL) }
+            ) {
+                Canvas(Modifier.fillMaxSize()) {
+                    val u = size.minDimension / 24f
+                    val plane = androidx.compose.ui.graphics.Path().apply {
+                        moveTo(4.2f * u, 11.6f * u)
+                        lineTo(19.6f * u, 5.4f * u)
+                        lineTo(16.9f * u, 18.6f * u)
+                        lineTo(12.4f * u, 15.2f * u)
+                        lineTo(10.0f * u, 17.6f * u)
+                        lineTo(9.6f * u, 13.4f * u)
+                        close()
+                    }
+                    drawPath(plane, Color.White)
+                    drawLine(
+                        color = Color(0xFF229ED9),
+                        start = Offset(9.8f * u, 13.4f * u),
+                        end = Offset(16.8f * u, 8.4f * u),
+                        strokeWidth = 1.1f * u
+                    )
+                }
+            }
+
+            // Gmail
+            SupportTile(
+                background = SolidColor(Color.White),
                 onClick = {
                     openLink(
                         Intent(
@@ -3063,29 +3173,43 @@ fun SupportSection() {
                             Uri.parse("mailto:$SUPPORT_EMAIL?subject=" + Uri.encode("AniStream Support"))
                         )
                     )
-                },
-                modifier = Modifier.weight(1f)
-            )
-            SmallOutlineButton(
-                text = "Telegram",
-                onClick = { openUrl(SUPPORT_TELEGRAM_URL) },
-                modifier = Modifier.weight(1f)
-            )
-        }
-        Spacer(Modifier.height(9.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(9.dp), modifier = Modifier.fillMaxWidth()) {
-            SmallOutlineButton(
-                text = "WhatsApp",
-                onClick = { openUrl(SUPPORT_WHATSAPP_URL) },
-                modifier = Modifier.weight(1f)
-            )
-            SmallOutlineButton(
-                text = "Instagram",
-                onClick = { openUrl(SUPPORT_INSTAGRAM_URL) },
-                modifier = Modifier.weight(1f)
-            )
+                }
+            ) {
+                Canvas(Modifier.fillMaxSize()) {
+                    val u = size.minDimension / 24f
+                    val m = androidx.compose.ui.graphics.Path().apply {
+                        moveTo(4.8f * u, 18.2f * u)
+                        lineTo(4.8f * u, 7.2f * u)
+                        lineTo(12f * u, 12.8f * u)
+                        lineTo(19.2f * u, 7.2f * u)
+                        lineTo(19.2f * u, 18.2f * u)
+                    }
+                    drawPath(
+                        path = m,
+                        color = Color(0xFFEA4335),
+                        style = Stroke(width = 2.6f * u, cap = StrokeCap.Round, join = StrokeJoin.Round)
+                    )
+                }
+            }
         }
     }
+}
+
+@Composable
+private fun SupportTile(
+    background: Brush,
+    onClick: () -> Unit,
+    content: @Composable BoxScope.() -> Unit
+) {
+    Box(
+        Modifier
+            .size(54.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(background)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+        content = content
+    )
 }
 
 @Composable
