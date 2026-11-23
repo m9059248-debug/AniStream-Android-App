@@ -1,4 +1,4 @@
-package com.anistream.hindi
+ji jipackage com.anistream.hindi
 
 import android.app.Activity
 import android.app.DownloadManager
