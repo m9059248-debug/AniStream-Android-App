@@ -3,10 +3,12 @@ package com.anistream.hindi
 import android.app.Activity
 import android.app.DownloadManager
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.widget.Toast
 import android.os.Bundle
 import android.os.Environment
 import android.util.Base64
@@ -89,6 +91,12 @@ import java.util.Locale
 private const val SUPABASE_URL = "https://cyftkgouolxcverswvpv.supabase.co"
 private const val SUPABASE_KEY = "sb_publishable_h-Alm01lWCWvvlWcW-Uqyg_iAub4QH3"
 private const val AUTH_PREFS = "anistream_auth_prefs"
+
+// ====== SUPPORT CONTACTS ======
+private const val SUPPORT_EMAIL = "k99171561@gmail.com"
+private const val SUPPORT_TELEGRAM_URL = "https://t.me/Anistream_hindi"
+private const val SUPPORT_WHATSAPP_URL = "https://whatsapp.com/channel/0029Vb72aj2LtOjAPw8izr3N"
+private const val SUPPORT_INSTAGRAM_URL = "https://www.instagram.com/anistream_hindi"
 private const val MY_LIST_PREFS = "anistream_my_list_prefs"
 private const val DOWNLOAD_PREFS = "anistream_download_prefs"
 
@@ -158,7 +166,9 @@ data class UserSession(
     val fullName: String,
     val accessToken: String,
     val createdAt: String,
-    val avatarUrl: String = ""
+    val avatarUrl: String = "",
+    val username: String = "",
+    val bio: String = ""
 )
 data class AnimeComment(
     val id: String,
@@ -232,6 +242,8 @@ private fun saveUserSession(context: Context, session: UserSession) {
         .putString("created_at", session.createdAt)
         .putString("avatar_url", finalAvatar)
         .putString("avatar_backup_${session.userId}", finalAvatar)
+        .putString("username", session.username)
+        .putString("bio", session.bio)
         .apply()
 }
 
@@ -244,7 +256,9 @@ private fun loadUserSession(context: Context): UserSession? {
     val createdAt = prefs.getString("created_at", "").orEmpty()
     val avatarUrl = prefs.getString("avatar_url", "").orEmpty()
         .ifBlank { prefs.getString("avatar_backup_$userId", "").orEmpty() }
-    return UserSession(userId, email, fullName, token, createdAt, avatarUrl)
+    val username = prefs.getString("username", "").orEmpty()
+    val bio = prefs.getString("bio", "").orEmpty()
+    return UserSession(userId, email, fullName, token, createdAt, avatarUrl, username, bio)
 }
 
 private fun clearUserSession(context: Context) {
@@ -256,6 +270,8 @@ private fun clearUserSession(context: Context) {
         .remove("access_token")
         .remove("created_at")
         .remove("avatar_url")
+        .remove("username")
+        .remove("bio")
         .apply()
 }
 
@@ -403,6 +419,20 @@ private suspend fun supabaseUpdateAvatar(session: UserSession, newAvatarUrl: Str
     parseUserSession(JSONObject(res), fallbackToken = session.accessToken, fallbackAvatar = newAvatarUrl)
 }
 
+private suspend fun supabaseUpdateProfileDetails(session: UserSession, username: String, bio: String): UserSession = withContext(Dispatchers.IO) {
+    val body = JSONObject().apply {
+        put("data", JSONObject().put("username", username).put("bio", bio))
+    }
+    val res = request(
+        "$SUPABASE_URL/auth/v1/user",
+        method = "PUT",
+        body = body.toString(),
+        supabase = true,
+        bearerToken = session.accessToken
+    )
+    parseUserSession(JSONObject(res), fallbackToken = session.accessToken, fallbackAvatar = session.avatarUrl)
+}
+
 private suspend fun supabaseAddToMyList(session: UserSession, animeId: String, allIds: Set<String>) = withContext(Dispatchers.IO) {
     runCatching {
         val payload = JSONObject().apply {
@@ -542,7 +572,9 @@ private fun parseUserSession(root: JSONObject, fallbackToken: String = "", fallb
     val avatarUrl = metadata?.optString("avatar_url").orEmpty()
         .takeUnless { it == "null" }.orEmpty()
         .ifBlank { fallbackAvatar }
-    return UserSession(userId, email, fullName, token, createdAt, avatarUrl)
+    val username = metadata?.optString("username").orEmpty().takeUnless { it == "null" }.orEmpty()
+    val bio = metadata?.optString("bio").orEmpty().takeUnless { it == "null" }.orEmpty()
+    return UserSession(userId, email, fullName, token, createdAt, avatarUrl, username, bio)
 }
 
 private suspend fun supabaseSignUp(fullName: String, email: String, password: String): Pair<UserSession?, String> = withContext(Dispatchers.IO) {
@@ -555,9 +587,9 @@ private suspend fun supabaseSignUp(fullName: String, email: String, password: St
     val json = JSONObject(res)
     val accessToken = json.optString("access_token")
     if (accessToken.isNotBlank() && accessToken != "null") {
-        Pair(parseUserSession(json), "Account ban gaya aur aap login ho gaye hain!")
+        Pair(parseUserSession(json), "Account ban gaya hai aur aap login ho gaye hain!")
     } else {
-        Pair(null, "Signup successful! Agar email verification on hai toh apna email verify karke Login karein.")
+        Pair(null, "Signup ho gaya! Agar email verification on hai, to apna email verify karke login karein.")
     }
 }
 
@@ -574,7 +606,7 @@ private suspend fun supabaseSignIn(email: String, password: String): UserSession
     )
     val json = JSONObject(res)
     val session = parseUserSession(json)
-    if (session.accessToken.isBlank()) throw Exception("Login token nahi mila. Kripya dubara try karein.")
+    if (session.accessToken.isBlank()) throw Exception("Login token nahi mila. Kripya dobara try karein.")
     session
 }
 
@@ -1874,7 +1906,7 @@ fun CommentsSection(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        "Comment karne ke liye Login karein",
+                        "Comment karne ke liye login karein",
                         color = Gray,
                         fontSize = 12.sp,
                         modifier = Modifier.weight(1f)
@@ -1934,7 +1966,7 @@ fun CommentsSection(
                                         loadComments()
                                     } catch (e: Exception) {
                                         isError = true
-                                        statusMsg = e.message ?: "Comment post nahi ho paya."
+                                        statusMsg = e.message ?: "Comment post nahi ho paaya."
                                     } finally {
                                         posting = false
                                     }
@@ -1982,7 +2014,7 @@ fun CommentsSection(
                     .padding(16.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Text("Abhi koi comment nahi hai. Pehla comment aap karein!", color = Gray, fontSize = 12.sp)
+                Text("Abhi tak koi comment nahi hai. Pehla comment aap karein!", color = Gray, fontSize = 12.sp)
             }
             else -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 comments.forEach { item ->
@@ -2144,7 +2176,7 @@ fun MyListScreen(
                 Text("Your My List is Empty", color = White, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold)
                 Spacer(Modifier.height(5.dp))
                 Text(
-                    "Kisi bhi Anime par 'Add to My List' dabayein taaki aap use baad mein aasani se dekh sakein.",
+                    "Kisi bhi Anime par 'Add to My List' dabayein, taaki aap ise baad mein aasani se dekh sakein.",
                     color = Gray,
                     fontSize = 12.sp
                 )
@@ -2248,6 +2280,10 @@ fun ProfileScreen(
     var infoMsg by remember { mutableStateOf<String?>(null) }
     var downloadsCount by remember { mutableIntStateOf(0) }
     var showAvatarDialog by remember { mutableStateOf(false) }
+    var showEditDialog by remember { mutableStateOf(false) }
+    var usernameInput by remember { mutableStateOf("") }
+    var bioInput by remember { mutableStateOf("") }
+    var editError by remember { mutableStateOf<String?>(null) }
     var customAvatarUrlInput by remember(session?.avatarUrl) {
         mutableStateOf(
             if (session?.avatarUrl?.startsWith("http") == true) session.avatarUrl else ""
@@ -2266,9 +2302,9 @@ fun ProfileScreen(
             try {
                 val cloudUpdated = supabaseUpdateAvatar(localUpdated, newAvatarData)
                 onSessionUpdated(cloudUpdated)
-                infoMsg = if (newAvatarData.isBlank()) "Profile photo hata di gayi." else "Profile photo update aur Supabase mein sync ho gayi!"
+                infoMsg = if (newAvatarData.isBlank()) "Profile photo hata di gayi hai." else "Profile photo update ho gayi aur Supabase mein sync bhi ho gayi!"
             } catch (e: Exception) {
-                infoMsg = "Profile photo device par save ho gayi."
+                infoMsg = "Profile photo device par save ho gayi hai."
             } finally {
                 loading = false
             }
@@ -2286,7 +2322,7 @@ fun ProfileScreen(
                 if (!base64Avatar.isNullOrBlank()) {
                     applyNewAvatar(base64Avatar)
                 } else {
-                    errorMsg = "Photo read nahi ho payi. Dusri photo try karein."
+                    errorMsg = "Photo read nahi ho paayi. Doosri photo try karein."
                 }
             }
         }
@@ -2295,6 +2331,97 @@ fun ProfileScreen(
     LaunchedEffect(session) {
         if (session != null) {
             downloadsCount = withContext(Dispatchers.IO) { readDownloads(context).size }
+        }
+    }
+
+    if (showEditDialog && session != null) {
+        Dialog(onDismissRequest = { if (!loading) showEditDialog = false }) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(SurfaceDark)
+                    .border(1.dp, Color(0xFF2D2F3E), RoundedCornerShape(16.dp))
+                    .padding(16.dp)
+            ) {
+                Text("Edit Profile", color = White, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = usernameInput,
+                    onValueChange = { usernameInput = it.take(20) },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Username", color = Gray, fontSize = 11.sp) },
+                    placeholder = { Text("e.g. otaku_king", color = Gray, fontSize = 11.sp) },
+                    prefix = { Text("@", color = Gray) },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = White,
+                        unfocusedTextColor = White,
+                        focusedBorderColor = AccentRed,
+                        unfocusedBorderColor = Gray,
+                        cursorColor = AccentRed
+                    )
+                )
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = bioInput,
+                    onValueChange = { bioInput = it.take(120) },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Bio", color = Gray, fontSize = 11.sp) },
+                    placeholder = { Text("Apne baare mein kuch likhein...", color = Gray, fontSize = 11.sp) },
+                    supportingText = { Text("${bioInput.length}/120", color = Gray, fontSize = 10.sp) },
+                    minLines = 2,
+                    maxLines = 4,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = White,
+                        unfocusedTextColor = White,
+                        focusedBorderColor = AccentRed,
+                        unfocusedBorderColor = Gray,
+                        cursorColor = AccentRed
+                    )
+                )
+                editError?.let {
+                    Spacer(Modifier.height(6.dp))
+                    Text(it, color = AccentRed, fontSize = 11.sp)
+                }
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(9.dp), modifier = Modifier.fillMaxWidth()) {
+                    SmallOutlineButton(
+                        text = "Cancel",
+                        onClick = { showEditDialog = false },
+                        modifier = Modifier.weight(1f),
+                        enabled = !loading
+                    )
+                    SmallOutlineButton(
+                        text = if (loading) "Saving..." else "Save",
+                        onClick = {
+                            val cleanUsername = usernameInput.trim().removePrefix("@").lowercase()
+                            val cleanBio = bioInput.trim()
+                            if (cleanUsername.isNotEmpty() && !Regex("^[a-z0-9_.]{3,20}$").matches(cleanUsername)) {
+                                editError = "Username 3 se 20 characters ka hona chahiye (sirf letters, numbers, _ aur .)."
+                            } else {
+                                loading = true
+                                editError = null
+                                scope.launch {
+                                    try {
+                                        val updated = supabaseUpdateProfileDetails(session, cleanUsername, cleanBio)
+                                        onSessionUpdated(updated)
+                                        showEditDialog = false
+                                        infoMsg = "Profile update ho gayi!"
+                                    } catch (e: Exception) {
+                                        editError = e.message ?: "Profile update nahi ho paayi."
+                                    } finally {
+                                        loading = false
+                                    }
+                                }
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        selected = true,
+                        enabled = !loading
+                    )
+                }
+            }
         }
     }
 
@@ -2592,9 +2719,9 @@ fun ProfileScreen(
                             val cleanEmail = email.trim()
                             when {
                                 isSignUp && fullName.trim().length < 2 -> errorMsg = "Kripya apna naam likhein."
-                                !cleanEmail.contains("@") || !cleanEmail.contains(".") -> errorMsg = "Valid email address dalein."
+                                !cleanEmail.contains("@") || !cleanEmail.contains(".") -> errorMsg = "Kripya valid email address daalein."
                                 password.length < 6 -> errorMsg = "Password kam se kam 6 characters ka hona chahiye."
-                                isSignUp && password != confirmPassword -> errorMsg = "Password aur Confirm Password match nahi kar rahe."
+                                isSignUp && password != confirmPassword -> errorMsg = "Password aur Confirm Password match nahi ho rahe."
                                 else -> {
                                     loading = true
                                     scope.launch {
@@ -2700,6 +2827,13 @@ fun ProfileScreen(
                             fontWeight = FontWeight.ExtraBold
                         )
                         Text(session.email, color = Gray, fontSize = 11.5.sp)
+                        if (session.username.isNotBlank()) {
+                            Text("@${session.username}", color = AccentRed, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                        }
+                        if (session.bio.isNotBlank()) {
+                            Spacer(Modifier.height(3.dp))
+                            Text(session.bio, color = White, fontSize = 11.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                        }
                     }
                 }
 
@@ -2709,6 +2843,17 @@ fun ProfileScreen(
                     onClick = { showAvatarDialog = true },
                     modifier = Modifier.fillMaxWidth(),
                     selected = true
+                )
+                Spacer(Modifier.height(8.dp))
+                SmallOutlineButton(
+                    text = "\u270E  Edit Username & Bio",
+                    onClick = {
+                        usernameInput = session.username
+                        bioInput = session.bio
+                        editError = null
+                        showEditDialog = true
+                    },
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
 
@@ -2724,6 +2869,8 @@ fun ProfileScreen(
                 Text("ACCOUNT DETAILS", color = AccentRed, fontSize = 10.5.sp, fontWeight = FontWeight.ExtraBold)
                 Spacer(Modifier.height(8.dp))
                 InfoLine("Full Name", session.fullName.ifBlank { "Not set" })
+                InfoLine("Username", if (session.username.isBlank()) "Not set" else "@${session.username}")
+                InfoLine("Bio", session.bio.ifBlank { "Not set" })
                 InfoLine("Email", session.email)
                 InfoLine("User ID", session.userId.ifBlank { "N/A" })
                 InfoLine("Joined On", session.createdAt.ifBlank { "Active" })
@@ -2802,6 +2949,70 @@ fun ProfileScreen(
                     fontWeight = FontWeight.ExtraBold
                 )
             }
+        }
+
+        Spacer(Modifier.height(14.dp))
+        SupportSection()
+        Spacer(Modifier.height(20.dp))
+    }
+}
+
+@Composable
+fun SupportSection() {
+    val context = LocalContext.current
+
+    fun openLink(intent: Intent) {
+        try {
+            context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (e: Exception) {
+            Toast.makeText(context, "Ye link open nahi ho paaya.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun openUrl(url: String) = openLink(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(15.dp))
+            .background(SurfaceDark)
+            .padding(15.dp)
+    ) {
+        Text("SUPPORT", color = AccentRed, fontSize = 10.5.sp, fontWeight = FontWeight.ExtraBold)
+        Spacer(Modifier.height(4.dp))
+        Text("Koi problem ya sawal ho to hamse sampark karein:", color = Gray, fontSize = 11.sp)
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(9.dp), modifier = Modifier.fillMaxWidth()) {
+            SmallOutlineButton(
+                text = "Gmail",
+                onClick = {
+                    openLink(
+                        Intent(
+                            Intent.ACTION_SENDTO,
+                            Uri.parse("mailto:$SUPPORT_EMAIL?subject=" + Uri.encode("AniStream Support"))
+                        )
+                    )
+                },
+                modifier = Modifier.weight(1f)
+            )
+            SmallOutlineButton(
+                text = "Telegram",
+                onClick = { openUrl(SUPPORT_TELEGRAM_URL) },
+                modifier = Modifier.weight(1f)
+            )
+        }
+        Spacer(Modifier.height(9.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(9.dp), modifier = Modifier.fillMaxWidth()) {
+            SmallOutlineButton(
+                text = "WhatsApp",
+                onClick = { openUrl(SUPPORT_WHATSAPP_URL) },
+                modifier = Modifier.weight(1f)
+            )
+            SmallOutlineButton(
+                text = "Instagram",
+                onClick = { openUrl(SUPPORT_INSTAGRAM_URL) },
+                modifier = Modifier.weight(1f)
+            )
         }
     }
 }
@@ -2883,7 +3094,7 @@ fun SearchScreen(
                     .padding(20.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Text("Koi Anime nahi mila. Dusra naam search karein.", color = Gray, fontSize = 12.sp)
+                Text("Koi Anime nahi mila. Doosra naam search karein.", color = Gray, fontSize = 12.sp)
             }
         } else {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(9.dp)) {
@@ -3272,7 +3483,7 @@ fun PlayerScreen(
                 val fetched = fetchVideoServers(episode.id)
                 servers = fetched
                 if (fetched.isEmpty()) {
-                    error = "Is Episode ke liye abhi video link add nahi hua."
+                    error = "Is Episode ke liye abhi video link add nahi kiya gaya hai."
                 } else {
                     language = fetched.firstOrNull { it.language.equals("Hindi", true) }?.language ?: fetched.first().language
                     selectedServerName = fetched.firstOrNull { it.language.equals(language, true) }?.serverName ?: fetched.first().serverName
@@ -3280,7 +3491,7 @@ fun PlayerScreen(
                     quality = matching.firstOrNull { it.quality.equals("720p", true) }?.quality ?: matching.firstOrNull()?.quality.orEmpty()
                 }
             } catch (e: Exception) {
-                error = e.message ?: "Video links load nahi ho paye"
+                error = e.message ?: "Video links load nahi ho paaye."
             }
             loading = false
         }
@@ -3302,14 +3513,14 @@ fun PlayerScreen(
 
     fun triggerDownload() {
         if (dlUrl.isBlank()) {
-            downloadMessage = "Is server par download link uplabdh nahi hai."
+            downloadMessage = "Is server par download link available nahi hai."
             return
         }
         try {
             startDownload(context, dlUrl, "AniStream_Ep_${episode.episodeNumber}_${selected?.quality}")
             downloadMessage = "Download start ho gaya! Downloads tab mein dekhein."
         } catch (e: Exception) {
-            downloadMessage = e.message ?: "Download start nahi hua."
+            downloadMessage = e.message ?: "Download start nahi ho paaya."
         }
     }
 
@@ -4372,7 +4583,7 @@ fun DownloadsScreen(onPlay: (DownloadInfo) -> Unit) {
             ) {
                 Text("↓", color = AccentRed, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold)
                 Spacer(Modifier.height(6.dp))
-                Text("Abhi koi download nahi hai", color = White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Text("Abhi tak koi download nahi hai", color = White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(4.dp))
                 Text("Kisi bhi episode ke Watch Page par 'Download Episode' dabayein.", color = Gray, fontSize = 11.5.sp)
             }
@@ -4438,7 +4649,7 @@ fun DownloadsScreen(onPlay: (DownloadInfo) -> Unit) {
                                         removeDownload(context, item.id)
                                         startDownload(context, item.sourceUrl, item.title)
                                         refreshList()
-                                        statusMessage = "Download dubara start ho gaya."
+                                        statusMessage = "Download dobara start ho gaya."
                                     }.onFailure {
                                         statusMessage = it.message ?: "Retry fail ho gaya."
                                     }
@@ -4478,7 +4689,7 @@ fun DownloadsScreen(onPlay: (DownloadInfo) -> Unit) {
                         )
                     }
                     if (item.localUri.isBlank()) {
-                        Text("Downloaded file ka URI nahi mil raha.", color = AccentRed, fontSize = 10.sp)
+                        Text("Downloaded file ka URI nahi mil raha hai.", color = AccentRed, fontSize = 10.sp)
                     }
                 }
             }
