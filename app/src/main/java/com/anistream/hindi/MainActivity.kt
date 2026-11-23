@@ -10,6 +10,9 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import com.google.firebase.messaging.FirebaseMessaging
+import com.google.firebase.messaging.FirebaseMessagingService
+import com.google.firebase.messaging.RemoteMessage
 import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
@@ -189,10 +192,69 @@ data class AnimeComment(
     val createdAt: String
 )
 
+private const val NEW_ANIME_CHANNEL_ID = "new_anime"
+private const val NEW_ANIME_TOPIC = "new_anime"
+
+private fun createNewAnimeChannel(context: Context) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val channel = NotificationChannel(
+            NEW_ANIME_CHANNEL_ID,
+            "New Anime",
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply { description = "Naya anime add hone par notification" }
+        context.getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+    }
+}
+
 class MainActivity : ComponentActivity() {
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        setupNewAnimeNotifications()
         setContent { AniStreamApp() }
+    }
+
+    private fun setupNewAnimeNotifications() {
+        createNewAnimeChannel(this)
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        // Har user is topic ko subscribe karta hai, naye anime ki notification sabko jaati hai
+        FirebaseMessaging.getInstance().subscribeToTopic(NEW_ANIME_TOPIC)
+    }
+}
+
+class AniStreamMessagingService : FirebaseMessagingService() {
+    @Suppress("MissingPermission")
+    override fun onMessageReceived(message: RemoteMessage) {
+        val title = message.notification?.title ?: message.data["title"] ?: "AniStream"
+        val body = message.notification?.body ?: message.data["body"].orEmpty()
+
+        createNewAnimeChannel(this)
+        val intent = Intent(this, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        val pendingIntent = PendingIntent.getActivity(
+            this, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification = NotificationCompat.Builder(this, NEW_ANIME_CHANNEL_ID)
+            .setSmallIcon(applicationInfo.icon)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .build()
+
+        val allowed = Build.VERSION.SDK_INT < 33 ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        if (allowed) {
+            NotificationManagerCompat.from(this).notify(System.currentTimeMillis().toInt(), notification)
+        }
     }
 }
 
