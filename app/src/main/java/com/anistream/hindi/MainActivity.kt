@@ -1,6 +1,13 @@
 package com.anistream.hindi
 
 import android.app.Activity
+import kotlinx.coroutines.sync.withLock
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import androidx.media3.common.PlaybackException
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -188,7 +195,8 @@ data class UserSession(
     val createdAt: String,
     val avatarUrl: String = "",
     val username: String = "",
-    val bio: String = ""
+    val bio: String = "",
+    val refreshToken: String = ""
 )
 data class AnimeComment(
     val id: String,
@@ -209,7 +217,7 @@ private fun createNewAnimeChannel(context: Context) {
             NEW_ANIME_CHANNEL_ID,
             "New Anime",
             NotificationManager.IMPORTANCE_HIGH
-        ).apply { description = "Naya anime add hone par notification" }
+        ).apply { description = "Notification when a new anime is added" }
         context.getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
 }
@@ -221,7 +229,14 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setupNewAnimeNotifications()
+        parseOAuthIntent(intent)?.let { oauthCallback = it }
         setContent { AniStreamApp() }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        parseOAuthIntent(intent)?.let { oauthCallback = it }
     }
 
     private fun setupNewAnimeNotifications() {
@@ -323,6 +338,7 @@ private fun saveUserSession(context: Context, session: UserSession) {
         .putString("avatar_backup_${session.userId}", finalAvatar)
         .putString("username", session.username)
         .putString("bio", session.bio)
+        .putString("refresh_token", session.refreshToken.ifBlank { prefs.getString("refresh_token", "").orEmpty() })
         .apply()
 }
 
@@ -337,7 +353,8 @@ private fun loadUserSession(context: Context): UserSession? {
         .ifBlank { prefs.getString("avatar_backup_$userId", "").orEmpty() }
     val username = prefs.getString("username", "").orEmpty()
     val bio = prefs.getString("bio", "").orEmpty()
-    return UserSession(userId, email, fullName, token, createdAt, avatarUrl, username, bio)
+    val refresh = prefs.getString("refresh_token", "").orEmpty()
+    return UserSession(userId, email, fullName, token, createdAt, avatarUrl, username, bio, refresh)
 }
 
 private fun clearUserSession(context: Context) {
@@ -351,6 +368,7 @@ private fun clearUserSession(context: Context) {
         .remove("avatar_url")
         .remove("username")
         .remove("bio")
+        .remove("refresh_token")
         .apply()
 }
 
@@ -653,7 +671,85 @@ private fun parseUserSession(root: JSONObject, fallbackToken: String = "", fallb
         .ifBlank { fallbackAvatar }
     val username = metadata?.optString("username").orEmpty().takeUnless { it == "null" }.orEmpty()
     val bio = metadata?.optString("bio").orEmpty().takeUnless { it == "null" }.orEmpty()
-    return UserSession(userId, email, fullName, token, createdAt, avatarUrl, username, bio)
+    val refresh = root.optString("refresh_token").takeUnless { it == "null" }.orEmpty()
+    return UserSession(userId, email, fullName, token, createdAt, avatarUrl, username, bio, refresh)
+}
+
+/* ================= GOOGLE LOGIN (browser + Supabase) ================= */
+private const val GOOGLE_REDIRECT_URI = "anistream://auth-callback"
+
+data class OAuthCallback(val accessToken: String, val refreshToken: String, val error: String)
+
+// MainActivity yahan result rakhti hai, MainApp use dekh kar login complete karta hai
+private var oauthCallback by mutableStateOf<OAuthCallback?>(null)
+
+private fun parseOAuthIntent(intent: Intent?): OAuthCallback? {
+    val data = intent?.data ?: return null
+    if (data.scheme != "anistream" || data.host != "auth-callback") return null
+    val raw = data.fragment ?: data.encodedQuery.orEmpty()
+    val params = raw.split("&").mapNotNull { part ->
+        val i = part.indexOf('=')
+        if (i <= 0) null else Uri.decode(part.substring(0, i)) to Uri.decode(part.substring(i + 1).replace("+", " "))
+    }.toMap()
+    intent?.data = null // same callback dobara process na ho
+    return OAuthCallback(
+        accessToken = params["access_token"].orEmpty(),
+        refreshToken = params["refresh_token"].orEmpty(),
+        error = params["error_description"] ?: params["error"].orEmpty()
+    )
+}
+
+private fun startGoogleLogin(context: Context) {
+    val url = "$SUPABASE_URL/auth/v1/authorize?provider=google&prompt=select_account&redirect_to=" + Uri.encode(GOOGLE_REDIRECT_URI)
+    try {
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    } catch (e: Exception) {
+        Toast.makeText(context, "Could not open the browser.", Toast.LENGTH_SHORT).show()
+    }
+}
+
+private suspend fun supabaseSessionFromTokens(accessToken: String, refreshToken: String): UserSession = withContext(Dispatchers.IO) {
+    val res = request("$SUPABASE_URL/auth/v1/user", method = "GET", supabase = true, bearerToken = accessToken)
+    val obj = JSONObject(res).put("access_token", accessToken).put("refresh_token", refreshToken)
+    parseUserSession(obj)
+}
+
+/* LOGIN TOKEN REFRESH: Supabase login token ~1 ghante baad expire ho jata hai */
+private val refreshMutex = kotlinx.coroutines.sync.Mutex()
+@Volatile private var lastRefreshedSession: UserSession? = null
+@Volatile private var lastRefreshAt = 0L
+
+private fun jwtSecondsLeft(token: String): Long = runCatching {
+    val payload = token.split(".")[1]
+    val json = String(
+        android.util.Base64.decode(payload, android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP),
+        Charsets.UTF_8
+    )
+    JSONObject(json).getLong("exp") - System.currentTimeMillis() / 1000L
+}.getOrDefault(0L)
+
+private suspend fun supabaseRefreshSession(context: Context, session: UserSession): UserSession = refreshMutex.withLock {
+    val recent = lastRefreshedSession
+    if (recent != null && recent.userId == session.userId && System.currentTimeMillis() - lastRefreshAt < 15_000L) {
+        return@withLock recent
+    }
+    val prefs = context.getSharedPreferences(AUTH_PREFS, Context.MODE_PRIVATE)
+    val refreshToken = session.refreshToken.ifBlank { prefs.getString("refresh_token", "").orEmpty() }
+    if (refreshToken.isBlank()) throw Exception("Your session has expired. Please log out and log in again.")
+    val renewed = withContext(Dispatchers.IO) {
+        val body = JSONObject().put("refresh_token", refreshToken)
+        val res = request(
+            "$SUPABASE_URL/auth/v1/token?grant_type=refresh_token",
+            method = "POST",
+            body = body.toString(),
+            supabase = true
+        )
+        parseUserSession(JSONObject(res), fallbackToken = session.accessToken, fallbackAvatar = session.avatarUrl)
+    }
+    saveUserSession(context, renewed)
+    lastRefreshedSession = renewed
+    lastRefreshAt = System.currentTimeMillis()
+    renewed
 }
 
 private suspend fun supabaseSignUp(fullName: String, email: String, password: String): Pair<UserSession?, String> = withContext(Dispatchers.IO) {
@@ -666,9 +762,9 @@ private suspend fun supabaseSignUp(fullName: String, email: String, password: St
     val json = JSONObject(res)
     val accessToken = json.optString("access_token")
     if (accessToken.isNotBlank() && accessToken != "null") {
-        Pair(parseUserSession(json), "Account ban gaya hai aur aap login ho gaye hain!")
+        Pair(parseUserSession(json), "Account created and you are logged in!")
     } else {
-        Pair(null, "Signup ho gaya! Agar email verification on hai, to apna email verify karke login karein.")
+        Pair(null, "Sign up successful! If email verification is on, please verify your email and then log in.")
     }
 }
 
@@ -685,7 +781,7 @@ private suspend fun supabaseSignIn(email: String, password: String): UserSession
     )
     val json = JSONObject(res)
     val session = parseUserSession(json)
-    if (session.accessToken.isBlank()) throw Exception("Login token nahi mila. Kripya dobara try karein.")
+    if (session.accessToken.isBlank()) throw Exception("Login token not found. Please try again.")
     session
 }
 
@@ -1066,6 +1162,39 @@ fun AniStreamApp() {
         }
     }
 
+    // Google login se wapas aane par login complete karo
+    val googleCallback = oauthCallback
+    LaunchedEffect(googleCallback) {
+        val cb = googleCallback ?: return@LaunchedEffect
+        oauthCallback = null
+        if (cb.accessToken.isBlank()) {
+            Toast.makeText(context, cb.error.ifBlank { "Google sign-in failed. Please try again." }, Toast.LENGTH_LONG).show()
+            return@LaunchedEffect
+        }
+        try {
+            val session = supabaseSessionFromTokens(cb.accessToken, cb.refreshToken)
+            userSession = session
+            saveUserSession(context, session)
+            tab = 4
+            Toast.makeText(context, "Logged in with Google", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(context, e.message ?: "Google sign-in failed. Please try again.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    // Login token expire hone se pehle (ya app khulte hi expire mila to) use refresh kar do
+    LaunchedEffect(userSession?.userId) {
+        if (userSession == null) return@LaunchedEffect
+        while (true) {
+            val current = userSession ?: break
+            if (jwtSecondsLeft(current.accessToken) < 600L) {
+                val renewed = runCatching { supabaseRefreshSession(context, current) }.getOrNull()
+                if (renewed != null) userSession = renewed
+            }
+            delay(5 * 60 * 1000L)
+        }
+    }
+
     BackHandler(enabled = offlineDownload != null) { offlineDownload = null }
     BackHandler(enabled = offlineDownload == null && selectedAnime == null && tab != 0) {
         tab = 0
@@ -1260,7 +1389,8 @@ fun AniStreamApp() {
                             )
                             5 -> ChatScreen(
                                 session = userSession,
-                                onLoginClick = { tab = 4 }
+                                onLoginClick = { tab = 4 },
+                                onSessionRefreshed = { userSession = it }
                             )
                         }
                     }
@@ -1997,7 +2127,7 @@ fun CommentsSection(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        "Comment karne ke liye login karein",
+                        "Log in to comment",
                         color = Gray,
                         fontSize = 12.sp,
                         modifier = Modifier.weight(1f)
@@ -2043,7 +2173,7 @@ fun CommentsSection(
                                 val clean = commentInput.trim()
                                 if (clean.length < 2) {
                                     isError = true
-                                    statusMsg = "Kripya comment likhein."
+                                    statusMsg = "Please write a comment."
                                     return@clickable
                                 }
                                 posting = true
@@ -2053,11 +2183,11 @@ fun CommentsSection(
                                         postAnimeComment(animeId, clean, userSession)
                                         commentInput = ""
                                         isError = false
-                                        statusMsg = "Comment post ho gaya!"
+                                        statusMsg = "Comment posted!"
                                         loadComments()
                                     } catch (e: Exception) {
                                         isError = true
-                                        statusMsg = e.message ?: "Comment post nahi ho paaya."
+                                        statusMsg = e.message ?: "Could not post the comment."
                                     } finally {
                                         posting = false
                                     }
@@ -2105,7 +2235,7 @@ fun CommentsSection(
                     .padding(16.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Text("Abhi tak koi comment nahi hai. Pehla comment aap karein!", color = Gray, fontSize = 12.sp)
+                Text("No comments yet. Be the first to comment!", color = Gray, fontSize = 12.sp)
             }
             else -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 comments.forEach { item ->
@@ -2267,7 +2397,7 @@ fun MyListScreen(
                 Text("Your My List is Empty", color = White, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold)
                 Spacer(Modifier.height(5.dp))
                 Text(
-                    "Kisi bhi Anime par 'Add to My List' dabayein, taaki aap ise baad mein aasani se dekh sakein.",
+                    "Tap 'Add to My List' on any anime to watch it easily later.",
                     color = Gray,
                     fontSize = 12.sp
                 )
@@ -2393,9 +2523,9 @@ fun ProfileScreen(
             try {
                 val cloudUpdated = supabaseUpdateAvatar(localUpdated, newAvatarData)
                 onSessionUpdated(cloudUpdated)
-                infoMsg = if (newAvatarData.isBlank()) "Profile photo hata di gayi hai." else "Profile photo update ho gayi aur Supabase mein sync bhi ho gayi!"
+                infoMsg = if (newAvatarData.isBlank()) "Profile photo removed." else "Profile photo updated and synced to the cloud!"
             } catch (e: Exception) {
-                infoMsg = "Profile photo device par save ho gayi hai."
+                infoMsg = "Profile photo saved on this device."
             } finally {
                 loading = false
             }
@@ -2413,7 +2543,7 @@ fun ProfileScreen(
                 if (!base64Avatar.isNullOrBlank()) {
                     applyNewAvatar(base64Avatar)
                 } else {
-                    errorMsg = "Photo read nahi ho paayi. Doosri photo try karein."
+                    errorMsg = "Could not read the photo. Please try another photo."
                 }
             }
         }
@@ -2459,7 +2589,7 @@ fun ProfileScreen(
                     onValueChange = { bioInput = it.take(120) },
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("Bio", color = Gray, fontSize = 11.sp) },
-                    placeholder = { Text("Apne baare mein kuch likhein...", color = Gray, fontSize = 11.sp) },
+                    placeholder = { Text("Write something about yourself...", color = Gray, fontSize = 11.sp) },
                     supportingText = { Text("${bioInput.length}/120", color = Gray, fontSize = 10.sp) },
                     minLines = 2,
                     maxLines = 4,
@@ -2489,7 +2619,7 @@ fun ProfileScreen(
                             val cleanUsername = usernameInput.trim().removePrefix("@").lowercase()
                             val cleanBio = bioInput.trim()
                             if (cleanUsername.isNotEmpty() && !Regex("^[a-z0-9_.]{3,20}$").matches(cleanUsername)) {
-                                editError = "Username 3 se 20 characters ka hona chahiye (sirf letters, numbers, _ aur .)."
+                                editError = "Username must be 3 to 20 characters (letters, numbers, _ and . only)."
                             } else {
                                 loading = true
                                 editError = null
@@ -2498,9 +2628,9 @@ fun ProfileScreen(
                                         val updated = supabaseUpdateProfileDetails(session, cleanUsername, cleanBio)
                                         onSessionUpdated(updated)
                                         showEditDialog = false
-                                        infoMsg = "Profile update ho gayi!"
+                                        infoMsg = "Profile updated!"
                                     } catch (e: Exception) {
-                                        editError = e.message ?: "Profile update nahi ho paayi."
+                                        editError = e.message ?: "Could not update the profile."
                                     } finally {
                                         loading = false
                                     }
@@ -2528,7 +2658,7 @@ fun ProfileScreen(
             ) {
                 Text("Change Profile Photo", color = White, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
                 Spacer(Modifier.height(4.dp))
-                Text("Gallery se apni photo chunein ya Anime Avatar select karein:", color = Gray, fontSize = 11.sp)
+                Text("Choose a photo from your gallery or select an Anime Avatar:", color = Gray, fontSize = 11.sp)
 
                 Spacer(Modifier.height(12.dp))
 
@@ -2637,7 +2767,7 @@ fun ProfileScreen(
             )
             Text(
                 if (isSignUp) "Sign up with Supabase to sync your profile & My List."
-                else "Login to access your AniStream Hindi profile & cloud My List.",
+                else "Login to access your AniStream profile & cloud My List.",
                 color = Gray,
                 fontSize = 12.sp
             )
@@ -2809,10 +2939,10 @@ fun ProfileScreen(
                             infoMsg = null
                             val cleanEmail = email.trim()
                             when {
-                                isSignUp && fullName.trim().length < 2 -> errorMsg = "Kripya apna naam likhein."
-                                !cleanEmail.contains("@") || !cleanEmail.contains(".") -> errorMsg = "Kripya valid email address daalein."
-                                password.length < 6 -> errorMsg = "Password kam se kam 6 characters ka hona chahiye."
-                                isSignUp && password != confirmPassword -> errorMsg = "Password aur Confirm Password match nahi ho rahe."
+                                isSignUp && fullName.trim().length < 2 -> errorMsg = "Please enter your name."
+                                !cleanEmail.contains("@") || !cleanEmail.contains(".") -> errorMsg = "Please enter a valid email address."
+                                password.length < 6 -> errorMsg = "Password must be at least 6 characters."
+                                isSignUp && password != confirmPassword -> errorMsg = "Password and Confirm Password do not match."
                                 else -> {
                                     loading = true
                                     scope.launch {
@@ -2832,7 +2962,7 @@ fun ProfileScreen(
                                                 onSessionUpdated(loggedIn)
                                             }
                                         } catch (e: Exception) {
-                                            errorMsg = e.message ?: "Authentication fail ho gaya."
+                                            errorMsg = e.message ?: "Authentication failed."
                                         } finally {
                                             loading = false
                                         }
@@ -2852,6 +2982,29 @@ fun ProfileScreen(
                             fontWeight = FontWeight.ExtraBold
                         )
                     }
+                }
+
+                Spacer(Modifier.height(10.dp))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.weight(1f).height(1.dp).background(Color(0xFF2D2F3E)))
+                    Text("  or  ", color = Gray, fontSize = 11.sp)
+                    Box(Modifier.weight(1f).height(1.dp).background(Color(0xFF2D2F3E)))
+                }
+                Spacer(Modifier.height(10.dp))
+                val googleContext = LocalContext.current
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(40.dp)
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(Color.White)
+                        .clickable(enabled = !loading) { startGoogleLogin(googleContext) },
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("G", color = Color(0xFF4285F4), fontSize = 16.sp, fontWeight = FontWeight.Black)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Continue with Google", color = Color(0xFF1F1F1F), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
         } else {
@@ -3003,9 +3156,9 @@ fun ProfileScreen(
                         try {
                             val refreshed = supabaseFetchProfile(session)
                             onSessionUpdated(refreshed)
-                            infoMsg = "Profile details sync ho gayi hain."
+                            infoMsg = "Profile details synced."
                         } catch (e: Exception) {
-                            errorMsg = e.message ?: "Sync fail ho gaya."
+                            errorMsg = e.message ?: "Sync failed."
                         } finally {
                             loading = false
                         }
@@ -3056,7 +3209,7 @@ fun SupportSection() {
         try {
             context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         } catch (e: Exception) {
-            Toast.makeText(context, "Ye link open nahi ho paaya.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Could not open this link.", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -3068,7 +3221,7 @@ fun SupportSection() {
             .clip(RoundedCornerShape(16.dp))
             .background(SurfaceDark)
             .border(1.dp, Color(0xFF2D2F3E), RoundedCornerShape(16.dp))
-            .padding(horizontal = 14.dp, vertical = 16.dp),
+            .padding(horizontal = 14.dp, vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -3083,11 +3236,11 @@ fun SupportSection() {
             Text("SUPPORT", color = White, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.5.sp)
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(12.dp))
 
         Row(
             Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
+            horizontalArrangement = Arrangement.spacedBy(22.dp, Alignment.CenterHorizontally),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Instagram
@@ -3150,7 +3303,7 @@ fun SupportSection() {
                     imageVector = Icons.Filled.Call,
                     contentDescription = null,
                     tint = Color.White,
-                    modifier = Modifier.size(15.dp)
+                    modifier = Modifier.size(12.dp)
                 )
             }
 
@@ -3220,8 +3373,8 @@ private fun SupportTile(
 ) {
     Box(
         Modifier
-            .size(54.dp)
-            .clip(RoundedCornerShape(16.dp))
+            .size(40.dp)
+            .clip(RoundedCornerShape(12.dp))
             .background(background)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
@@ -3238,6 +3391,40 @@ data class ChatMessage(
     val message: String,
     val createdAt: String
 )
+
+// Token expire ho gaya ho to ek baar refresh karke dobara try karta hai
+private suspend fun <T> chatCall(
+    context: Context,
+    session: UserSession,
+    onRefreshed: (UserSession) -> Unit,
+    block: suspend (UserSession) -> T
+): T {
+    return try {
+        block(session)
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        val m = e.message.orEmpty()
+        val expired = m.contains("jwt", true) || m.contains("401") || m.contains("expired", true)
+        if (!expired) throw e
+        val renewed = supabaseRefreshSession(context, session)
+        onRefreshed(renewed)
+        block(renewed)
+    }
+}
+
+private fun chatFriendlyError(raw: String?, fallback: String): String {
+    val msg = raw.orEmpty()
+    return when {
+        msg.contains("row-level security", true) -> "You can't send messages right now. You may have been blocked from the chat."
+        msg.contains("jwt", true) || msg.contains("refresh token", true) || msg.contains("401") ->
+            "Your session has expired. Please log out and log in again."
+        msg.contains("chat_messages", true) || msg.contains("schema cache", true) ->
+            "Chat is not set up yet. Please contact support."
+        msg.isBlank() -> fallback
+        else -> msg
+    }
+}
 
 private suspend fun fetchChatMessages(session: UserSession): List<ChatMessage> = withContext(Dispatchers.IO) {
     val url = "$SUPABASE_URL/rest/v1/chat_messages?select=id,user_id,user_name,username,message,created_at&order=created_at.desc&limit=80"
@@ -3281,7 +3468,7 @@ private fun formatChatTime(iso: String): String = runCatching {
 }.getOrDefault("")
 
 @Composable
-fun ChatScreen(session: UserSession?, onLoginClick: () -> Unit) {
+fun ChatScreen(session: UserSession?, onLoginClick: () -> Unit, onSessionRefreshed: (UserSession) -> Unit) {
     if (session == null) {
         Column(
             Modifier
@@ -3295,7 +3482,7 @@ fun ChatScreen(session: UserSession?, onLoginClick: () -> Unit) {
             Text("Community Chat", color = White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
             Spacer(Modifier.height(6.dp))
             Text(
-                "Chat mein shamil hone ke liye pehle login karein.",
+                "Please log in to join the chat.",
                 color = Gray,
                 fontSize = 12.sp,
                 textAlign = TextAlign.Center
@@ -3309,12 +3496,12 @@ fun ChatScreen(session: UserSession?, onLoginClick: () -> Unit) {
             )
         }
     } else {
-        ChatRoom(session)
+        ChatRoom(session, onSessionRefreshed)
     }
 }
 
 @Composable
-private fun ChatRoom(session: UserSession) {
+private fun ChatRoom(session: UserSession, onSessionRefreshed: (UserSession) -> Unit) {
     var messages by remember { mutableStateOf<List<ChatMessage>>(emptyList()) }
     var input by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
@@ -3323,17 +3510,18 @@ private fun ChatRoom(session: UserSession) {
     var firstLoadDone by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     // Is page par rehne tak har 3 second mein naye messages aate rahenge
     LaunchedEffect(session.accessToken) {
         while (true) {
             try {
-                messages = fetchChatMessages(session)
+                messages = chatCall(context, session, onSessionRefreshed) { fetchChatMessages(it) }
                 loadError = null
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
-                loadError = e.message ?: "Messages load nahi ho paaye."
+                loadError = chatFriendlyError(e.message, "Could not load messages.")
             }
             firstLoadDone = true
             delay(3000)
@@ -3355,14 +3543,11 @@ private fun ChatRoom(session: UserSession) {
         sendError = null
         scope.launch {
             try {
-                sendChatMessage(session, text)
+                chatCall(context, session, onSessionRefreshed) { sendChatMessage(it, text) }
                 input = ""
-                messages = fetchChatMessages(session)
+                messages = chatCall(context, session, onSessionRefreshed) { fetchChatMessages(it) }
             } catch (e: Exception) {
-                val raw = e.message ?: "Message nahi gaya."
-                sendError = if (raw.contains("row-level security", ignoreCase = true)) {
-                    "Aapko chat se block kar diya gaya hai."
-                } else raw
+                sendError = chatFriendlyError(e.message, "Message could not be sent.")
             } finally {
                 sending = false
             }
@@ -3386,7 +3571,7 @@ private fun ChatRoom(session: UserSession) {
             Spacer(Modifier.width(9.dp))
             Column {
                 Text("Community Chat", color = White, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
-                Text("Sabhi members ke saath baat karein", color = Gray, fontSize = 10.5.sp)
+                Text("Talk with all members", color = Gray, fontSize = 10.5.sp)
             }
         }
 
@@ -3398,7 +3583,7 @@ private fun ChatRoom(session: UserSession) {
             when {
                 !firstLoadDone -> Text("Loading...", color = Gray, fontSize = 12.sp, modifier = Modifier.align(Alignment.Center))
                 messages.isEmpty() -> Text(
-                    "Abhi koi message nahi hai. Pehla message aap bhejein!",
+                    "No messages yet. Send the first message!",
                     color = Gray,
                     fontSize = 12.sp,
                     textAlign = TextAlign.Center,
@@ -3432,7 +3617,7 @@ private fun ChatRoom(session: UserSession) {
                 value = input,
                 onValueChange = { input = it.take(500) },
                 modifier = Modifier.weight(1f),
-                placeholder = { Text("Message likhein...", color = Gray, fontSize = 12.sp) },
+                placeholder = { Text("Type a message...", color = Gray, fontSize = 12.sp) },
                 maxLines = 4,
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedTextColor = White,
@@ -3590,7 +3775,7 @@ fun SearchScreen(
                     .padding(20.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Text("Koi Anime nahi mila. Doosra naam search karein.", color = Gray, fontSize = 12.sp)
+                Text("No anime found. Try a different name.", color = Gray, fontSize = 12.sp)
             }
         } else {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(9.dp)) {
@@ -3827,7 +4012,7 @@ fun AnimeDetailsScreen(
                 Text("Season load error: $seasonsError", color = AccentRed, fontSize = 11.5.sp)
                 Spacer(Modifier.height(6.dp))
                 SmallOutlineButton(text = "↻ Retry Seasons", onClick = { loadSeasons(force = true) })
-            } else if (seasons.isEmpty()) Text("Abhi is Anime ke Seasons add nahi kiye gaye hain.", color = Gray, fontSize = 11.5.sp)
+            } else if (seasons.isEmpty()) Text("No seasons have been added for this anime yet.", color = Gray, fontSize = 11.5.sp)
             else {
                 Row(
                     Modifier
@@ -3870,7 +4055,7 @@ fun AnimeDetailsScreen(
                 Spacer(Modifier.height(8.dp))
                 if (episodesLoading) CircularProgressIndicator(Modifier.size(20.dp), color = AccentRed)
                 else if (episodesError != null) Text("Episode load error: $episodesError", color = AccentRed, fontSize = 11.5.sp)
-                else if (episodes.isEmpty()) Text("Is Season mein abhi koi Published Episode nahi hai.", color = Gray, fontSize = 11.5.sp)
+                else if (episodes.isEmpty()) Text("There are no published episodes in this season yet.", color = Gray, fontSize = 11.5.sp)
                 else Row(
                     Modifier
                         .fillMaxWidth()
@@ -3940,13 +4125,14 @@ fun PlayerScreen(
     onBack: () -> Unit,
     onEpisodeChange: (Int) -> Unit
 ) {
+    val appContext = LocalContext.current
     val cachedServers = remember(episode.id) { videoServersCache[episode.id].orEmpty() }
     val initialLang = remember(cachedServers) {
         cachedServers.firstOrNull { it.language.equals("Hindi", true) }?.language ?: cachedServers.firstOrNull()?.language.orEmpty()
     }
     val initialQual = remember(cachedServers, initialLang) {
         val m = cachedServers.filter { it.language.equals(initialLang, true) }
-        m.firstOrNull { it.quality.equals("720p", true) }?.quality ?: m.firstOrNull()?.quality.orEmpty()
+        preferredQuality(appContext, m)
     }
 
     var servers by remember(episode.id) { mutableStateOf(cachedServers) }
@@ -3979,15 +4165,15 @@ fun PlayerScreen(
                 val fetched = fetchVideoServers(episode.id)
                 servers = fetched
                 if (fetched.isEmpty()) {
-                    error = "Is Episode ke liye abhi video link add nahi kiya gaya hai."
+                    error = "No video link has been added for this episode yet."
                 } else {
                     language = fetched.firstOrNull { it.language.equals("Hindi", true) }?.language ?: fetched.first().language
                     selectedServerName = fetched.firstOrNull { it.language.equals(language, true) }?.serverName ?: fetched.first().serverName
                     val matching = fetched.filter { it.language.equals(language, true) && it.serverName == selectedServerName }
-                    quality = matching.firstOrNull { it.quality.equals("720p", true) }?.quality ?: matching.firstOrNull()?.quality.orEmpty()
+                    quality = preferredQuality(appContext, matching)
                 }
             } catch (e: Exception) {
-                error = e.message ?: "Video links load nahi ho paaye."
+                error = e.message ?: "Could not load video links."
             }
             loading = false
         }
@@ -4009,14 +4195,14 @@ fun PlayerScreen(
 
     fun triggerDownload() {
         if (dlUrl.isBlank()) {
-            downloadMessage = "Is server par download link available nahi hai."
+            downloadMessage = "No download link is available on this server."
             return
         }
         try {
             startDownload(context, dlUrl, "AniStream_Ep_${episode.episodeNumber}_${selected?.quality}")
-            downloadMessage = "Download start ho gaya! Downloads tab mein dekhein."
+            downloadMessage = "Download started! Check the Downloads tab."
         } catch (e: Exception) {
-            downloadMessage = e.message ?: "Download start nahi ho paaya."
+            downloadMessage = e.message ?: "Could not start the download."
         }
     }
 
@@ -4083,7 +4269,7 @@ fun PlayerScreen(
                 onSelectLanguage = { lang ->
                     language = lang
                     val avail = servers.filter { it.language.equals(lang, true) }
-                    quality = avail.firstOrNull { it.quality.equals("720p", true) }?.quality ?: avail.firstOrNull()?.quality.orEmpty()
+                    quality = preferredQuality(appContext, avail)
                 },
                 onSelectQuality = { q -> quality = q },
                 onPreviousEpisode = { if (episodeIndex > 0) onEpisodeChange(episodeIndex - 1) },
@@ -4114,7 +4300,7 @@ fun PlayerScreen(
                                     val avail = servers.filter { it.language.equals(lang, true) }
                                     selectedServerName = avail.firstOrNull()?.serverName.orEmpty()
                                     val onServer = avail.filter { it.serverName == selectedServerName }
-                                    quality = onServer.firstOrNull { it.quality.equals("720p", true) }?.quality ?: onServer.firstOrNull()?.quality.orEmpty()
+                                    quality = preferredQuality(appContext, onServer)
                                     languageMenu = false
                                 })
                             }
@@ -4140,8 +4326,7 @@ fun PlayerScreen(
                                 selectedServerName = name
                                 val options = languageServers.filter { it.serverName == name }
                                 quality = options.firstOrNull { it.quality.equals(quality, true) }?.quality
-                                    ?: options.firstOrNull { it.quality.equals("720p", true) }?.quality
-                                    ?: options.firstOrNull()?.quality.orEmpty()
+                                    ?: preferredQuality(appContext, options)
                                 serverMenu = false
                             })
                         }
@@ -4210,6 +4395,42 @@ fun PlayerScreen(
             Spacer(Modifier.height(16.dp))
         }
     }
+}
+
+/* ===== SLOW NETWORK FRIENDLY PLAYER HELPERS ===== */
+@OptIn(androidx.media3.common.util.UnstableApi::class)
+private fun createTunedPlayer(context: Context): ExoPlayer {
+    // http -> https redirect, lamba timeout aur bada buffer: slow/unstable network par video atakna kam hota hai
+    val httpFactory = DefaultHttpDataSource.Factory()
+        .setAllowCrossProtocolRedirects(true)
+        .setConnectTimeoutMs(15_000)
+        .setReadTimeoutMs(25_000)
+        .setUserAgent("Mozilla/5.0 (Linux; Android 13; Mobile) AniStream/1.0")
+    val loadControl = DefaultLoadControl.Builder()
+        // min buffer 30s, max buffer 120s, play shuru karne se pehle 2s, atakne ke baad 6s buffer bharna
+        .setBufferDurationsMs(30_000, 120_000, 2_000, 6_000)
+        .setPrioritizeTimeOverSizeThresholds(true)
+        .build()
+    return ExoPlayer.Builder(context)
+        .setMediaSourceFactory(DefaultMediaSourceFactory(httpFactory))
+        .setLoadControl(loadControl)
+        .build()
+}
+
+private fun isOnMobileData(context: Context): Boolean = runCatching {
+    val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return@runCatching false
+    caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) && !caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+}.getOrDefault(false)
+
+private fun qualityRank(q: String): Int = q.filter { it.isDigit() }.toIntOrNull() ?: 0
+
+// Mobile data par pehle 480p, Wi-Fi par 720p; wo na ho to jo available ho
+private fun preferredQuality(context: Context, options: List<VideoServer>): String {
+    val qualities = options.map { it.quality }.distinct()
+    if (qualities.isEmpty()) return ""
+    val order = if (isOnMobileData(context)) listOf("480p", "360p", "720p", "1080p") else listOf("720p", "480p", "1080p", "360p")
+    return order.firstNotNullOfOrNull { want -> qualities.firstOrNull { it.equals(want, true) } } ?: qualities.first()
 }
 
 @Composable
@@ -4307,7 +4528,7 @@ fun WatchPlayer(
             }
         }
     } else {
-        val player = remember(context) { ExoPlayer.Builder(context).build() }
+        val player = remember(context) { createTunedPlayer(context) }
         var isPlaying by remember { mutableStateOf(true) }
         var isBuffering by remember { mutableStateOf(true) }
         var currentPos by remember { mutableLongStateOf(0L) }
@@ -4320,6 +4541,16 @@ fun WatchPlayer(
         var seekToast by remember { mutableStateOf<String?>(null) }
         var showAudioPopup by remember { mutableStateOf(false) }
         var showQualityPopup by remember { mutableStateOf(false) }
+        var pendingResumeMs by remember { mutableLongStateOf(0L) }
+        var pendingResumeAt by remember { mutableLongStateOf(0L) }
+        var playbackError by remember { mutableStateOf<String?>(null) }
+        var autoRetries by remember { mutableIntStateOf(0) }
+        var errorTick by remember { mutableIntStateOf(0) }
+        var gaveUp by remember { mutableStateOf(false) }
+        var rebufferTick by remember { mutableIntStateOf(0) }
+        var userPickedQuality by remember(episodeTitle) { mutableStateOf(false) }
+        var slowHintShown by remember(episodeTitle) { mutableStateOf(false) }
+        val stallTimes = remember { mutableListOf<Long>() }
 
         DisposableEffect(player) {
             val listener = object : Player.Listener {
@@ -4329,8 +4560,15 @@ fun WatchPlayer(
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     isBuffering = playbackState == Player.STATE_BUFFERING
                     if (playbackState == Player.STATE_READY) {
+                        playbackError = null
+                        autoRetries = 0
+                        gaveUp = false
                         duration = player.duration.coerceAtLeast(0L)
                     }
+                }
+                override fun onPlayerError(error: PlaybackException) {
+                    playbackError = "Could not play the video. Check your network or try a lower quality."
+                    errorTick++
                 }
             }
             player.addListener(listener)
@@ -4341,10 +4579,66 @@ fun WatchPlayer(
         }
 
         LaunchedEffect(player, videoUrl) {
-            player.setMediaItem(MediaItem.fromUri(videoUrl))
+            // Quality badalne par video wahin se chalu rahe (shuru se na ho)
+            val resumeFrom = if (System.currentTimeMillis() - pendingResumeAt < 3_000L) pendingResumeMs else 0L
+            pendingResumeMs = 0L
+            playbackError = null
+            autoRetries = 0
+            gaveUp = false
+            stallTimes.clear()
+            if (resumeFrom > 0L) player.setMediaItem(MediaItem.fromUri(videoUrl), resumeFrom)
+            else player.setMediaItem(MediaItem.fromUri(videoUrl))
             player.prepare()
             player.playWhenReady = true
             player.setPlaybackSpeed(normalSpeed)
+        }
+
+        // Error aaye to 2 baar apne aap dobara try karo
+        LaunchedEffect(errorTick) {
+            if (errorTick == 0) return@LaunchedEffect
+            if (autoRetries < 2) {
+                autoRetries++
+                delay(2_000L * autoRetries)
+                player.prepare()
+                player.playWhenReady = true
+            } else {
+                gaveUp = true
+            }
+        }
+
+        // Buffering bahut der tak ho ya baar-baar ho to network slow maano
+        LaunchedEffect(isBuffering, videoUrl) {
+            if (!isBuffering) return@LaunchedEffect
+            delay(4_000)
+            val now = System.currentTimeMillis()
+            stallTimes.add(now)
+            stallTimes.removeAll { now - it > 90_000L }
+            if (stallTimes.size >= 2) {
+                stallTimes.clear()
+                rebufferTick++
+                return@LaunchedEffect
+            }
+            delay(8_000)
+            stallTimes.clear()
+            rebufferTick++
+        }
+
+        // Network slow ho to ek step kam quality par apne aap switch karo
+        LaunchedEffect(rebufferTick) {
+            if (rebufferTick == 0) return@LaunchedEffect
+            val ranked = availableQualities.sortedBy { qualityRank(it) }
+            val idx = ranked.indexOfFirst { it.equals(currentQuality, true) }
+            val lower = if (idx > 0) ranked[idx - 1] else null
+            if (lower != null && !userPickedQuality) {
+                Toast.makeText(context, "Slow network detected. Switched to $lower.", Toast.LENGTH_SHORT).show()
+                pendingResumeMs = player.currentPosition
+                pendingResumeAt = System.currentTimeMillis()
+                onSelectQuality(lower)
+            } else if (!slowHintShown) {
+                slowHintShown = true
+                val hint = if (lower != null) "Slow network. Try $lower quality." else "Your network is very slow."
+                Toast.makeText(context, hint, Toast.LENGTH_LONG).show()
+            }
         }
 
         LaunchedEffect(player) {
@@ -4445,6 +4739,29 @@ fun WatchPlayer(
                 )
             }
 
+            if (gaveUp && playbackError != null) {
+                Column(
+                    Modifier
+                        .align(Alignment.Center)
+                        .padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(playbackError ?: "", color = White, fontSize = 12.sp, textAlign = TextAlign.Center)
+                    Spacer(Modifier.height(10.dp))
+                    SmallOutlineButton(
+                        text = "↻ Retry",
+                        onClick = {
+                            playbackError = null
+                            gaveUp = false
+                            autoRetries = 0
+                            player.prepare()
+                            player.playWhenReady = true
+                        },
+                        selected = true
+                    )
+                }
+            }
+
             if (isHolding2x) {
                 Surface(
                     color = Color(0xAA000000),
@@ -4531,6 +4848,8 @@ fun WatchPlayer(
                                         DropdownMenuItem(
                                             text = { Text(if (lang.equals(currentLanguage, true)) "✓ $lang" else lang) },
                                             onClick = {
+                                                pendingResumeMs = player.currentPosition
+                                                pendingResumeAt = System.currentTimeMillis()
                                                 onSelectLanguage(lang)
                                                 showAudioPopup = false
                                             }
@@ -4553,6 +4872,9 @@ fun WatchPlayer(
                                         DropdownMenuItem(
                                             text = { Text(if (q.equals(currentQuality, true)) "✓ $q" else q) },
                                             onClick = {
+                                                userPickedQuality = true
+                                                pendingResumeMs = player.currentPosition
+                                                pendingResumeAt = System.currentTimeMillis()
                                                 onSelectQuality(q)
                                                 showQualityPopup = false
                                             }
@@ -5055,7 +5377,7 @@ fun DownloadsScreen(onPlay: (DownloadInfo) -> Unit) {
                     onClick = {
                         failedItems.forEach { removeDownload(context, it.id) }
                         refreshList()
-                        statusMessage = "Failed downloads hata diye gaye hain."
+                        statusMessage = "Failed downloads removed."
                     }
                 )
             }
@@ -5079,9 +5401,9 @@ fun DownloadsScreen(onPlay: (DownloadInfo) -> Unit) {
             ) {
                 Text("↓", color = AccentRed, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold)
                 Spacer(Modifier.height(6.dp))
-                Text("Abhi tak koi download nahi hai", color = White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Text("No downloads yet", color = White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(4.dp))
-                Text("Kisi bhi episode ke Watch Page par 'Download Episode' dabayein.", color = Gray, fontSize = 11.5.sp)
+                Text("Tap 'Download Episode' on any episode's watch page.", color = Gray, fontSize = 11.5.sp)
             }
         }
 
@@ -5128,7 +5450,7 @@ fun DownloadsScreen(onPlay: (DownloadInfo) -> Unit) {
                         onClick = {
                             removeDownload(context, item.id)
                             refreshList()
-                            statusMessage = "${item.title} cancel kar diya gaya."
+                            statusMessage = "${item.title} was cancelled."
                         },
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -5145,9 +5467,9 @@ fun DownloadsScreen(onPlay: (DownloadInfo) -> Unit) {
                                         removeDownload(context, item.id)
                                         startDownload(context, item.sourceUrl, item.title)
                                         refreshList()
-                                        statusMessage = "Download dobara start ho gaya."
+                                        statusMessage = "Download restarted."
                                     }.onFailure {
-                                        statusMessage = it.message ?: "Retry fail ho gaya."
+                                        statusMessage = it.message ?: "Retry failed."
                                     }
                                 },
                                 modifier = Modifier.weight(1f),
@@ -5180,12 +5502,12 @@ fun DownloadsScreen(onPlay: (DownloadInfo) -> Unit) {
                             onClick = {
                                 removeDownload(context, item.id)
                                 refreshList()
-                                statusMessage = "${item.title} delete kar diya gaya."
+                                statusMessage = "${item.title} was deleted."
                             }
                         )
                     }
                     if (item.localUri.isBlank()) {
-                        Text("Downloaded file ka URI nahi mil raha hai.", color = AccentRed, fontSize = 10.sp)
+                        Text("Could not find the downloaded file.", color = AccentRed, fontSize = 10.sp)
                     }
                 }
             }
