@@ -234,14 +234,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setupNewAnimeNotifications()
-        parseOAuthIntent(intent)?.let { oauthCallback = it }
         setContent { AniStreamApp() }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        parseOAuthIntent(intent)?.let { oauthCallback = it }
     }
 
     private fun setupNewAnimeNotifications() {
@@ -680,45 +678,7 @@ private fun parseUserSession(root: JSONObject, fallbackToken: String = "", fallb
     return UserSession(userId, email, fullName, token, createdAt, avatarUrl, username, bio, refresh)
 }
 
-/* ================= GOOGLE LOGIN (browser + Supabase) ================= */
-private const val GOOGLE_REDIRECT_URI = "anistream://auth-callback"
-
-data class OAuthCallback(val accessToken: String, val refreshToken: String, val error: String)
-
-// MainActivity yahan result rakhti hai, MainApp use dekh kar login complete karta hai
-private var oauthCallback by mutableStateOf<OAuthCallback?>(null)
-
-private fun parseOAuthIntent(intent: Intent?): OAuthCallback? {
-    val data = intent?.data ?: return null
-    if (data.scheme != "anistream" || data.host != "auth-callback") return null
-    val raw = data.fragment ?: data.encodedQuery.orEmpty()
-    val params = raw.split("&").mapNotNull { part ->
-        val i = part.indexOf('=')
-        if (i <= 0) null else Uri.decode(part.substring(0, i)) to Uri.decode(part.substring(i + 1).replace("+", " "))
-    }.toMap()
-    intent?.data = null // same callback dobara process na ho
-    return OAuthCallback(
-        accessToken = params["access_token"].orEmpty(),
-        refreshToken = params["refresh_token"].orEmpty(),
-        error = params["error_description"] ?: params["error"].orEmpty()
-    )
-}
-
-private fun startGoogleLogin(context: Context) {
-    val url = "$SUPABASE_URL/auth/v1/authorize?provider=google&prompt=select_account&redirect_to=" + Uri.encode(GOOGLE_REDIRECT_URI)
-    try {
-        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-    } catch (e: Exception) {
-        Toast.makeText(context, "Could not open the browser.", Toast.LENGTH_SHORT).show()
-    }
-}
-
-private suspend fun supabaseSessionFromTokens(accessToken: String, refreshToken: String): UserSession = withContext(Dispatchers.IO) {
-    val res = request("$SUPABASE_URL/auth/v1/user", method = "GET", supabase = true, bearerToken = accessToken)
-    val obj = JSONObject(res).put("access_token", accessToken).put("refresh_token", refreshToken)
-    parseUserSession(obj)
-}
-
+/* ================= SUPABASE SESSION HELPERS ================= */
 /* LOGIN TOKEN REFRESH: Supabase login token ~1 ghante baad expire ho jata hai */
 private val refreshMutex = kotlinx.coroutines.sync.Mutex()
 @Volatile private var lastRefreshedSession: UserSession? = null
@@ -1167,26 +1127,6 @@ fun AniStreamApp() {
         }
     }
 
-    // Google login se wapas aane par login complete karo
-    val googleCallback = oauthCallback
-    LaunchedEffect(googleCallback) {
-        val cb = googleCallback ?: return@LaunchedEffect
-        oauthCallback = null
-        if (cb.accessToken.isBlank()) {
-            Toast.makeText(context, cb.error.ifBlank { "Google sign-in failed. Please try again." }, Toast.LENGTH_LONG).show()
-            return@LaunchedEffect
-        }
-        try {
-            val session = supabaseSessionFromTokens(cb.accessToken, cb.refreshToken)
-            userSession = session
-            saveUserSession(context, session)
-            tab = 4
-            Toast.makeText(context, "Logged in with Google", Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) {
-            Toast.makeText(context, e.message ?: "Google sign-in failed. Please try again.", Toast.LENGTH_LONG).show()
-        }
-    }
-
     // Login token expire hone se pehle (ya app khulte hi expire mila to) use refresh kar do
     LaunchedEffect(userSession?.userId) {
         if (userSession == null) return@LaunchedEffect
@@ -1264,96 +1204,59 @@ fun AniStreamApp() {
                         onBack = { selectedAnime = null }
                     )
                     else -> {
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .background(Color(0xFF0B0D13))
-                                .padding(horizontal = 12.dp, vertical = 9.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                        // Home screen header: only profile photo and name; no refresh, logo or category links.
+                        if (tab == 0) {
                             Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.clickable {
-                                    tab = 0
-                                    topNavCategory = "Home"
-                                }
-                            ) {
-                                Box(
-                                    Modifier
-                                        .clip(RoundedCornerShape(5.dp))
-                                        .background(AccentRed)
-                                        .padding(horizontal = 6.dp, vertical = 3.dp)
-                                ) {
-                                    Text("HD", color = White, fontSize = 9.sp, fontWeight = FontWeight.Black)
-                                }
-                                Spacer(Modifier.width(6.dp))
-                                Text("Ani", color = White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
-                                Text("Stream", color = AccentRed, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
-                            }
-
-                            Spacer(Modifier.width(10.dp))
-
-                            // Top Nav Links: Replaced "Home" button with "↻ Refresh" button
-                            Row(
-                                Modifier
-                                    .weight(1f)
-                                    .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(Color(0xFF090A10))
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                val navItems = listOf(
-                                    "Home" to "↻ Refresh",
-                                    "Ongoing" to "⚡ Ongoing",
-                                    "Series" to "📺 Series",
-                                    "Movies" to "🎬 Movies",
-                                    "All" to "📚 All Anime"
-                                )
-                                navItems.forEach { (key, label) ->
-                                    val active = tab == 0 && topNavCategory == key
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
                                     Text(
-                                        text = label,
-                                        color = if (active) White else Gray,
-                                        fontSize = 11.sp,
-                                        fontWeight = if (active) FontWeight.ExtraBold else FontWeight.Medium,
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(if (active) Color(0xFF23151D) else Color.Transparent)
-                                            .clickable {
-                                                tab = 0
-                                                topNavCategory = key
-                                                if (key == "Home") loadAllAnime()
-                                            }
-                                            .padding(horizontal = 7.dp, vertical = 4.dp)
+                                        text = "Ani",
+                                        color = White,
+                                        fontSize = 25.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        maxLines = 1
+                                    )
+                                    Text(
+                                        text = "Stream",
+                                        color = AccentRed,
+                                        fontSize = 25.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        maxLines = 1
                                     )
                                 }
-                            }
-
-                            Spacer(Modifier.width(8.dp))
-
-                            Row(
-                                Modifier
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .background(Color(0xFF1A1218))
-                                    .border(1.dp, AccentRed, RoundedCornerShape(20.dp))
-                                    .clickable { tab = 4 }
-                                    .padding(start = 4.dp, end = 9.dp, top = 3.dp, bottom = 3.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                UserAvatarView(
-                                    avatarUrl = userSession?.avatarUrl.orEmpty(),
-                                    fallbackInitial = badgeLetter,
-                                    size = 22.dp,
-                                    fontSize = 10.sp,
-                                    modifier = Modifier.clip(CircleShape)
-                                )
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    text = displayUserName,
-                                    color = White,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1
-                                )
+                                Row(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(28.dp))
+                                        .border(1.5.dp, AccentRed, RoundedCornerShape(28.dp))
+                                        .background(Color(0xFF160D14))
+                                        .clickable { tab = 4 }
+                                        .padding(start = 5.dp, end = 14.dp, top = 5.dp, bottom = 5.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    UserAvatarView(
+                                        avatarUrl = userSession?.avatarUrl.orEmpty(),
+                                        fallbackInitial = badgeLetter,
+                                        size = 38.dp,
+                                        fontSize = 15.sp,
+                                        modifier = Modifier.clip(CircleShape)
+                                    )
+                                    Spacer(Modifier.width(9.dp))
+                                    Text(
+                                        text = displayUserName,
+                                        color = White,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1
+                                    )
+                                }
                             }
                         }
 
@@ -2998,28 +2901,7 @@ fun ProfileScreen(
                     }
                 }
 
-                Spacer(Modifier.height(10.dp))
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.weight(1f).height(1.dp).background(Color(0xFF2D2F3E)))
-                    Text("  or  ", color = Gray, fontSize = 11.sp)
-                    Box(Modifier.weight(1f).height(1.dp).background(Color(0xFF2D2F3E)))
-                }
-                Spacer(Modifier.height(10.dp))
-                val googleContext = LocalContext.current
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(40.dp)
-                        .clip(RoundedCornerShape(9.dp))
-                        .background(Color.White)
-                        .clickable(enabled = !loading) { startGoogleLogin(googleContext) },
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("G", color = Color(0xFF4285F4), fontSize = 16.sp, fontWeight = FontWeight.Black)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Continue with Google", color = Color(0xFF1F1F1F), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
+
             }
         } else {
             val initial = (session.fullName.firstOrNull() ?: session.email.firstOrNull() ?: 'A').uppercaseChar()
