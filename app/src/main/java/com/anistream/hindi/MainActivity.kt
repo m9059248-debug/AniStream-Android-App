@@ -2502,6 +2502,7 @@ fun ProfileScreen(
     var downloadsCount by remember { mutableIntStateOf(0) }
     var showAvatarDialog by remember { mutableStateOf(false) }
     var showEditDialog by remember { mutableStateOf(false) }
+    var showFaqDialog by remember { mutableStateOf(false) }
     var usernameInput by remember { mutableStateOf("") }
     var bioInput by remember { mutableStateOf("") }
     var editError by remember { mutableStateOf<String?>(null) }
@@ -2523,9 +2524,9 @@ fun ProfileScreen(
             try {
                 val cloudUpdated = supabaseUpdateAvatar(localUpdated, newAvatarData)
                 onSessionUpdated(cloudUpdated)
-                infoMsg = if (newAvatarData.isBlank()) "Profile photo removed." else "Profile photo updated and synced to the cloud!"
+                infoMsg = if (newAvatarData.isBlank()) "Profile photo removed." else "Profile photo updated and synced!"
             } catch (e: Exception) {
-                infoMsg = "Profile photo saved on this device."
+                infoMsg = "Profile photo saved on device."
             } finally {
                 loading = false
             }
@@ -2543,7 +2544,7 @@ fun ProfileScreen(
                 if (!base64Avatar.isNullOrBlank()) {
                     applyNewAvatar(base64Avatar)
                 } else {
-                    errorMsg = "Could not read the photo. Please try another photo."
+                    errorMsg = "Could not read photo. Try another."
                 }
             }
         }
@@ -2552,6 +2553,41 @@ fun ProfileScreen(
     LaunchedEffect(session) {
         if (session != null) {
             downloadsCount = withContext(Dispatchers.IO) { readDownloads(context).size }
+        }
+    }
+
+    if (showFaqDialog) {
+        Dialog(onDismissRequest = { showFaqDialog = false }) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(SurfaceDark)
+                    .border(1.dp, AccentRed.copy(alpha = 0.6f), RoundedCornerShape(16.dp))
+                    .padding(16.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.width(3.dp).height(16.dp).clip(RoundedCornerShape(2.dp)).background(AccentRed))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Help & FAQ", color = White, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+                }
+                Spacer(Modifier.height(12.dp))
+                Text("• How to download episodes?", color = AccentRed, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text("Open any episode watch page and tap 'Download Episode' below the player.", color = Gray, fontSize = 11.sp)
+                Spacer(Modifier.height(8.dp))
+                Text("• How to change audio or quality?", color = AccentRed, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text("Use the Audio & Quality selectors on the watch page or inside the player.", color = Gray, fontSize = 11.sp)
+                Spacer(Modifier.height(8.dp))
+                Text("• Need direct support?", color = AccentRed, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text("Join our Telegram or Email us anytime from the Support card.", color = Gray, fontSize = 11.sp)
+                Spacer(Modifier.height(14.dp))
+                SmallOutlineButton(
+                    text = "Close",
+                    onClick = { showFaqDialog = false },
+                    modifier = Modifier.fillMaxWidth(),
+                    selected = true
+                )
+            }
         }
     }
 
@@ -2756,428 +2792,599 @@ fun ProfileScreen(
         Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
         if (session == null) {
-            Text(
-                if (isSignUp) "Create Account" else "Welcome Back",
-                color = White,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.ExtraBold
-            )
-            Text(
-                if (isSignUp) "Sign up with Supabase to sync your profile & My List."
-                else "Login to access your AniStream profile & cloud My List.",
-                color = Gray,
-                fontSize = 12.sp
-            )
-            Spacer(Modifier.height(14.dp))
-
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(SurfaceDark)
-                    .padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Box(
-                    Modifier
-                        .weight(1f)
-                        .height(36.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (!isSignUp) AccentRed else Color.Transparent)
-                        .clickable {
-                            isSignUp = false
-                            errorMsg = null
-                            infoMsg = null
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("LOGIN", color = White, fontSize = 11.5.sp, fontWeight = FontWeight.ExtraBold)
-                }
-                Box(
-                    Modifier
-                        .weight(1f)
-                        .height(36.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (isSignUp) AccentRed else Color.Transparent)
-                        .clickable {
-                            isSignUp = true
-                            errorMsg = null
-                            infoMsg = null
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("SIGN UP", color = White, fontSize = 11.5.sp, fontWeight = FontWeight.ExtraBold)
-                }
-            }
-
-            Spacer(Modifier.height(14.dp))
-
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(15.dp))
-                    .background(SurfaceDark)
-                    .padding(15.dp),
-                verticalArrangement = Arrangement.spacedBy(11.dp)
-            ) {
-                if (isSignUp) {
-                    OutlinedTextField(
-                        value = fullName,
-                        onValueChange = { fullName = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Full Name", color = Gray) },
-                        placeholder = { Text("Enter your name", color = Gray) },
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = White,
-                            unfocusedTextColor = White,
-                            focusedBorderColor = AccentRed,
-                            unfocusedBorderColor = Gray,
-                            cursorColor = AccentRed
-                        )
-                    )
-                }
-
-                OutlinedTextField(
-                    value = email,
-                    onValueChange = { email = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Email Address", color = Gray) },
-                    placeholder = { Text("name@example.com", color = Gray) },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = White,
-                        unfocusedTextColor = White,
-                        focusedBorderColor = AccentRed,
-                        unfocusedBorderColor = Gray,
-                        cursorColor = AccentRed
-                    )
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+                Text(
+                    if (isSignUp) "Create Account" else "Welcome Back",
+                    color = White,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.ExtraBold
                 )
-
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Password", color = Gray) },
-                    placeholder = { Text("Minimum 6 characters", color = Gray) },
-                    singleLine = true,
-                    visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
-                    trailingIcon = {
-                        Text(
-                            if (showPassword) "HIDE" else "SHOW",
-                            color = AccentRed,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier
-                                .clickable { showPassword = !showPassword }
-                                .padding(horizontal = 10.dp)
-                        )
-                    },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = White,
-                        unfocusedTextColor = White,
-                        focusedBorderColor = AccentRed,
-                        unfocusedBorderColor = Gray,
-                        cursorColor = AccentRed
-                    )
+                Text(
+                    if (isSignUp) "Sign up with Supabase to sync your profile & My List."
+                    else "Login to access your AniStream profile & cloud My List.",
+                    color = Gray,
+                    fontSize = 12.sp
                 )
+                Spacer(Modifier.height(14.dp))
 
-                if (isSignUp) {
-                    OutlinedTextField(
-                        value = confirmPassword,
-                        onValueChange = { confirmPassword = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Confirm Password", color = Gray) },
-                        placeholder = { Text("Re-enter password", color = Gray) },
-                        singleLine = true,
-                        visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = White,
-                            unfocusedTextColor = White,
-                            focusedBorderColor = AccentRed,
-                            unfocusedBorderColor = Gray,
-                            cursorColor = AccentRed
-                        )
-                    )
-                }
-
-                errorMsg?.let {
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xFF2D1219))
-                            .padding(10.dp)
-                    ) {
-                        Text(it, color = AccentRed, fontSize = 11.5.sp)
-                    }
-                }
-
-                infoMsg?.let {
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xFF112A1B))
-                            .padding(10.dp)
-                    ) {
-                        Text(it, color = Color(0xFF4CAF50), fontSize = 11.5.sp)
-                    }
-                }
-
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(40.dp)
-                        .clip(RoundedCornerShape(9.dp))
-                        .background(if (loading) Color(0xFF7A1529) else AccentRed)
-                        .clickable(enabled = !loading) {
-                            errorMsg = null
-                            infoMsg = null
-                            val cleanEmail = email.trim()
-                            when {
-                                isSignUp && fullName.trim().length < 2 -> errorMsg = "Please enter your name."
-                                !cleanEmail.contains("@") || !cleanEmail.contains(".") -> errorMsg = "Please enter a valid email address."
-                                password.length < 6 -> errorMsg = "Password must be at least 6 characters."
-                                isSignUp && password != confirmPassword -> errorMsg = "Password and Confirm Password do not match."
-                                else -> {
-                                    loading = true
-                                    scope.launch {
-                                        try {
-                                            if (isSignUp) {
-                                                val (newSession, message) = supabaseSignUp(fullName, cleanEmail, password)
-                                                if (newSession != null) {
-                                                    onSessionUpdated(newSession)
-                                                } else {
-                                                    infoMsg = message
-                                                    isSignUp = false
-                                                    password = ""
-                                                    confirmPassword = ""
-                                                }
-                                            } else {
-                                                val loggedIn = supabaseSignIn(cleanEmail, password)
-                                                onSessionUpdated(loggedIn)
-                                            }
-                                        } catch (e: Exception) {
-                                            errorMsg = e.message ?: "Authentication failed."
-                                        } finally {
-                                            loading = false
-                                        }
-                                    }
-                                }
-                            }
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (loading) {
-                        CircularProgressIndicator(Modifier.size(18.dp), color = White, strokeWidth = 2.dp)
-                    } else {
-                        Text(
-                            if (isSignUp) "CREATE ACCOUNT" else "LOGIN",
-                            color = White,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.ExtraBold
-                        )
-                    }
-                }
-
-                Spacer(Modifier.height(10.dp))
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.weight(1f).height(1.dp).background(Color(0xFF2D2F3E)))
-                    Text("  or  ", color = Gray, fontSize = 11.sp)
-                    Box(Modifier.weight(1f).height(1.dp).background(Color(0xFF2D2F3E)))
-                }
-                Spacer(Modifier.height(10.dp))
-                val googleContext = LocalContext.current
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .height(40.dp)
-                        .clip(RoundedCornerShape(9.dp))
-                        .background(Color.White)
-                        .clickable(enabled = !loading) { startGoogleLogin(googleContext) },
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(SurfaceDark)
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Text("G", color = Color(0xFF4285F4), fontSize = 16.sp, fontWeight = FontWeight.Black)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Continue with Google", color = Color(0xFF1F1F1F), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .height(36.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (!isSignUp) AccentRed else Color.Transparent)
+                            .clickable {
+                                isSignUp = false
+                                errorMsg = null
+                                infoMsg = null
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("LOGIN", color = White, fontSize = 11.5.sp, fontWeight = FontWeight.ExtraBold)
+                    }
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .height(36.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isSignUp) AccentRed else Color.Transparent)
+                            .clickable {
+                                isSignUp = true
+                                errorMsg = null
+                                infoMsg = null
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("SIGN UP", color = White, fontSize = 11.5.sp, fontWeight = FontWeight.ExtraBold)
+                    }
+                }
+
+                Spacer(Modifier.height(14.dp))
+
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(15.dp))
+                        .background(SurfaceDark)
+                        .padding(15.dp),
+                    verticalArrangement = Arrangement.spacedBy(11.dp)
+                ) {
+                    if (isSignUp) {
+                        OutlinedTextField(
+                            value = fullName,
+                            onValueChange = { fullName = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Full Name", color = Gray) },
+                            placeholder = { Text("Enter your name", color = Gray) },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = White,
+                                unfocusedTextColor = White,
+                                focusedBorderColor = AccentRed,
+                                unfocusedBorderColor = Gray,
+                                cursorColor = AccentRed
+                            )
+                        )
+                    }
+
+                    OutlinedTextField(
+                        value = email,
+                        onValueChange = { email = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Email Address", color = Gray) },
+                        placeholder = { Text("name@example.com", color = Gray) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = White,
+                            unfocusedTextColor = White,
+                            focusedBorderColor = AccentRed,
+                            unfocusedBorderColor = Gray,
+                            cursorColor = AccentRed
+                        )
+                    )
+
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = { password = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Password", color = Gray) },
+                        placeholder = { Text("Minimum 6 characters", color = Gray) },
+                        singleLine = true,
+                        visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            Text(
+                                if (showPassword) "HIDE" else "SHOW",
+                                color = AccentRed,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .clickable { showPassword = !showPassword }
+                                    .padding(horizontal = 10.dp)
+                            )
+                        },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = White,
+                            unfocusedTextColor = White,
+                            focusedBorderColor = AccentRed,
+                            unfocusedBorderColor = Gray,
+                            cursorColor = AccentRed
+                        )
+                    )
+
+                    if (isSignUp) {
+                        OutlinedTextField(
+                            value = confirmPassword,
+                            onValueChange = { confirmPassword = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Confirm Password", color = Gray) },
+                            placeholder = { Text("Re-enter password", color = Gray) },
+                            singleLine = true,
+                            visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = White,
+                                unfocusedTextColor = White,
+                                focusedBorderColor = AccentRed,
+                                unfocusedBorderColor = Gray,
+                                cursorColor = AccentRed
+                            )
+                        )
+                    }
+
+                    errorMsg?.let {
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF2D1219))
+                                .padding(10.dp)
+                        ) {
+                            Text(it, color = AccentRed, fontSize = 11.5.sp)
+                        }
+                    }
+
+                    infoMsg?.let {
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF112A1B))
+                                .padding(10.dp)
+                        ) {
+                            Text(it, color = Color(0xFF4CAF50), fontSize = 11.5.sp)
+                        }
+                    }
+
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(40.dp)
+                            .clip(RoundedCornerShape(9.dp))
+                            .background(if (loading) Color(0xFF7A1529) else AccentRed)
+                            .clickable(enabled = !loading) {
+                                errorMsg = null
+                                infoMsg = null
+                                val cleanEmail = email.trim()
+                                when {
+                                    isSignUp && fullName.trim().length < 2 -> errorMsg = "Please enter your name."
+                                    !cleanEmail.contains("@") || !cleanEmail.contains(".") -> errorMsg = "Please enter a valid email address."
+                                    password.length < 6 -> errorMsg = "Password must be at least 6 characters."
+                                    isSignUp && password != confirmPassword -> errorMsg = "Password and Confirm Password do not match."
+                                    else -> {
+                                        loading = true
+                                        scope.launch {
+                                            try {
+                                                if (isSignUp) {
+                                                    val (newSession, message) = supabaseSignUp(fullName, cleanEmail, password)
+                                                    if (newSession != null) {
+                                                        onSessionUpdated(newSession)
+                                                    } else {
+                                                        infoMsg = message
+                                                        isSignUp = false
+                                                        password = ""
+                                                        confirmPassword = ""
+                                                    }
+                                                } else {
+                                                    val loggedIn = supabaseSignIn(cleanEmail, password)
+                                                    onSessionUpdated(loggedIn)
+                                                }
+                                            } catch (e: Exception) {
+                                                errorMsg = e.message ?: "Authentication failed."
+                                            } finally {
+                                                loading = false
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (loading) {
+                            CircularProgressIndicator(Modifier.size(18.dp), color = White, strokeWidth = 2.dp)
+                        } else {
+                            Text(
+                                if (isSignUp) "CREATE ACCOUNT" else "LOGIN",
+                                color = White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.height(10.dp))
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.weight(1f).height(1.dp).background(Color(0xFF2D2F3E)))
+                        Text("  or  ", color = Gray, fontSize = 11.sp)
+                        Box(Modifier.weight(1f).height(1.dp).background(Color(0xFF2D2F3E)))
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    val googleContext = LocalContext.current
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(40.dp)
+                            .clip(RoundedCornerShape(9.dp))
+                            .background(Color.White)
+                            .clickable(enabled = !loading) { startGoogleLogin(googleContext) },
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("G", color = Color(0xFF4285F4), fontSize = 16.sp, fontWeight = FontWeight.Black)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Continue with Google", color = Color(0xFF1F1F1F), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         } else {
             val initial = (session.fullName.firstOrNull() ?: session.email.firstOrNull() ?: 'A').uppercaseChar()
 
-            Column(
+            // 1. CRIMSON MOON ANIME HEADER BANNER + AVATAR + VERIFIED SEAL + EDIT BUTTON
+            Box(
                 Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(SurfaceDark)
-                    .border(1.dp, Color(0xFF242733), RoundedCornerShape(18.dp))
-                    .padding(16.dp)
+                    .height(215.dp)
+                    .background(Color(0xFF0B070B))
             ) {
+                // Dark crimson anime moon backdrop
+                AsyncImage(
+                    model = "https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=1000&auto=format&fit=crop",
+                    contentDescription = "Profile Header Backdrop",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+                // Red atmospheric glow + dark bottom fade
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.radialGradient(
+                                colors = listOf(Color(0x66FF1744), Color(0xAA08090D)),
+                                radius = 750f
+                            )
+                        )
+                )
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color(0x3308090D),
+                                    Color(0x8808090D),
+                                    Color(0xFF08090D)
+                                )
+                            )
+                        )
+                )
+
+                // Right-side Edit Profile Square Button
+                Box(
+                    Modifier
+                        .align(Alignment.CenterEnd)
+                        .padding(end = 16.dp)
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(11.dp))
+                        .background(Color(0xCC161822))
+                        .border(1.dp, Color(0xFF3A3E52), RoundedCornerShape(11.dp))
+                        .clickable {
+                            usernameInput = session.username
+                            bioInput = session.bio
+                            editError = null
+                            showEditDialog = true
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("✎", color = White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                }
+
+                // Bottom-Left Avatar with Red Neon Ring + User Name + Red Verified Badge + Pill
                 Row(
-                    Modifier.fillMaxWidth(),
+                    Modifier
+                        .align(Alignment.BottomStart)
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 64.dp, bottom = 14.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(
                         Modifier
-                            .size(62.dp)
+                            .size(86.dp)
                             .clickable { showAvatarDialog = true }
                     ) {
-                        UserAvatarView(
-                            avatarUrl = session.avatarUrl,
-                            fallbackInitial = initial,
-                            size = 58.dp,
-                            fontSize = 22.sp,
-                            modifier = Modifier
-                                .clip(CircleShape)
-                                .border(1.5.dp, AccentRed, CircleShape)
-                        )
+                        // Outer soft red glow ring
                         Box(
                             Modifier
-                                .size(20.dp)
+                                .fillMaxSize()
+                                .clip(CircleShape)
+                                .border(1.dp, AccentRed.copy(alpha = 0.35f), CircleShape)
+                                .padding(3.dp)
+                                .clip(CircleShape)
+                                .border(2.dp, AccentRed, CircleShape)
+                        ) {
+                            UserAvatarView(
+                                avatarUrl = session.avatarUrl,
+                                fallbackInitial = initial,
+                                size = 80.dp,
+                                fontSize = 30.sp,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                        // Bottom-right pencil badge
+                        Box(
+                            Modifier
+                                .size(25.dp)
                                 .align(Alignment.BottomEnd)
                                 .clip(CircleShape)
                                 .background(AccentRed)
-                                .border(1.5.dp, SurfaceDark, CircleShape),
+                                .border(2.dp, Background, CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text("✎", color = White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            Text("✎", color = White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
 
-                    Spacer(Modifier.width(12.dp))
+                    Spacer(Modifier.width(14.dp))
+
                     Column(Modifier.weight(1f)) {
-                        Box(
-                            Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(Color(0xFF163222))
-                                .padding(horizontal = 7.dp, vertical = 2.5.dp)
-                        ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                "VERIFIED MEMBER",
-                                color = Color(0xFF4CAF50),
-                                fontSize = 8.sp,
-                                fontWeight = FontWeight.ExtraBold
+                                text = session.fullName.ifBlank { "AniStream User" },
+                                color = White,
+                                fontSize = 21.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
+                            Spacer(Modifier.width(6.dp))
+                            // Red verified rosette badge
+                            Box(
+                                Modifier
+                                    .size(18.dp)
+                                    .clip(CircleShape)
+                                    .background(AccentRed),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("✓", color = White, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                            }
                         }
-                        Spacer(Modifier.height(4.dp))
+
+                        Spacer(Modifier.height(2.dp))
                         Text(
-                            session.fullName.ifBlank { "AniStream User" },
-                            color = White,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.ExtraBold
+                            text = session.email,
+                            color = Color(0xFFB5B8C5),
+                            fontSize = 11.5.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
-                        Text(session.email, color = Gray, fontSize = 11.5.sp)
-                        if (session.username.isNotBlank()) {
-                            Text("@${session.username}", color = AccentRed, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
-                        }
-                        if (session.bio.isNotBlank()) {
-                            Spacer(Modifier.height(3.dp))
-                            Text(session.bio, color = White, fontSize = 11.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+
+                        Spacer(Modifier.height(6.dp))
+                        Row(
+                            Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(Color(0xAA1A1D28))
+                                .border(1.dp, Color(0xFF2E3244), RoundedCornerShape(20.dp))
+                                .clickable {
+                                    usernameInput = session.username
+                                    bioInput = session.bio
+                                    editError = null
+                                    showEditDialog = true
+                                }
+                                .padding(horizontal = 10.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("👤", fontSize = 10.sp)
+                            Spacer(Modifier.width(5.dp))
+                            Text(
+                                text = if (session.username.isNotBlank()) "@${session.username}" else "Not set",
+                                color = Color(0xFFD0D3DF),
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
                     }
                 }
-
-                Spacer(Modifier.height(11.dp))
-                SmallOutlineButton(
-                    text = if (session.avatarUrl.isBlank()) "📷  Set Profile Photo" else "📷  Change Profile Photo",
-                    onClick = { showAvatarDialog = true },
-                    modifier = Modifier.fillMaxWidth(),
-                    selected = true
-                )
-                Spacer(Modifier.height(8.dp))
-                SmallOutlineButton(
-                    text = "\u270E  Edit Username & Bio",
-                    onClick = {
-                        usernameInput = session.username
-                        bioInput = session.bio
-                        editError = null
-                        showEditDialog = true
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                )
             }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(6.dp))
 
-            Column(
+            // 2. RED NEON BORDERED ACCOUNT DETAILS CARD
+            Box(
                 Modifier
                     .fillMaxWidth()
+                    .padding(horizontal = 14.dp)
                     .clip(RoundedCornerShape(18.dp))
-                    .background(SurfaceDark)
-                    .border(1.dp, Color(0xFF242733), RoundedCornerShape(18.dp))
-                    .padding(16.dp)
+                    .background(
+                        Brush.horizontalGradient(
+                            colors = listOf(Color(0xFF13151F), Color(0xFF1A1016))
+                        )
+                    )
+                    .border(
+                        width = 1.3.dp,
+                        brush = Brush.verticalGradient(
+                            colors = listOf(AccentRed, Color(0xFF6E1225), AccentRed)
+                        ),
+                        shape = RoundedCornerShape(18.dp)
+                    )
             ) {
-                Text("ACCOUNT DETAILS", color = AccentRed, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.7.sp)
-                Spacer(Modifier.height(8.dp))
-                InfoLine("Full Name", session.fullName.ifBlank { "Not set" })
-                InfoLine("Username", if (session.username.isBlank()) "Not set" else "@${session.username}")
-                InfoLine("Bio", session.bio.ifBlank { "Not set" })
-                InfoLine("Email", session.email)
-                InfoLine("User ID", session.userId.ifBlank { "N/A" })
-                InfoLine("Joined On", session.createdAt.ifBlank { "Active" })
-                InfoLine("My List Saved", "$myListCount Anime")
-                InfoLine("Saved Downloads", "$downloadsCount Episodes")
+                // Subtle crimson mist on the right side of the card
+                Box(
+                    Modifier
+                        .matchParentSize()
+                        .background(
+                            Brush.radialGradient(
+                                colors = listOf(Color(0x2EFF1744), Color.Transparent),
+                                center = Offset(900f, 350f),
+                                radius = 650f
+                            )
+                        )
+                )
+
+                Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            Modifier
+                                .width(3.5.dp)
+                                .height(17.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(AccentRed)
+                        )
+                        Spacer(Modifier.width(9.dp))
+                        Text("Account Details", color = White, fontSize = 15.5.sp, fontWeight = FontWeight.ExtraBold)
+                    }
+
+                    Spacer(Modifier.height(14.dp))
+
+                    ProfileDetailRow("👤", "Full Name", session.fullName.ifBlank { "Not set" })
+                    ProfileDetailRow("😊", "Username", if (session.username.isBlank()) "Not set" else "@${session.username}")
+                    ProfileDetailRow("📝", "Bio", session.bio.ifBlank { "Not set" })
+                    ProfileDetailRow("✉", "Email", session.email)
+                    ProfileDetailRow("🆔", "User ID", session.userId.ifBlank { "N/A" })
+                    ProfileDetailRow("📅", "Joined On", session.createdAt.ifBlank { "Active" })
+                    ProfileDetailRow("☰", "My List Saved", "$myListCount Anime")
+                    ProfileDetailRow("↓", "Saved Downloads", "$downloadsCount Episodes")
+                }
             }
 
             Spacer(Modifier.height(12.dp))
 
             infoMsg?.let {
-                Text(it, color = Color(0xFF4CAF50), fontSize = 11.5.sp, modifier = Modifier.padding(bottom = 8.dp))
+                Text(it, color = Color(0xFF4CAF50), fontSize = 11.5.sp, modifier = Modifier.padding(horizontal = 16.dp, bottom = 6.dp))
             }
             errorMsg?.let {
-                Text(it, color = AccentRed, fontSize = 11.5.sp, modifier = Modifier.padding(bottom = 8.dp))
+                Text(it, color = AccentRed, fontSize = 11.5.sp, modifier = Modifier.padding(horizontal = 16.dp, bottom = 6.dp))
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(9.dp), modifier = Modifier.fillMaxWidth()) {
-                SmallOutlineButton(
-                    text = "♡  My List ($myListCount)",
-                    onClick = onOpenMyList,
-                    modifier = Modifier.weight(1f)
-                )
-                SmallOutlineButton(
-                    text = "↓  Downloads",
-                    onClick = onOpenDownloads,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            Spacer(Modifier.height(9.dp))
-
-            SmallOutlineButton(
-                text = "↻  Sync Profile & Cloud Data",
-                onClick = {
-                    loading = true
-                    errorMsg = null
-                    infoMsg = null
-                    scope.launch {
-                        try {
-                            val refreshed = supabaseFetchProfile(session)
-                            onSessionUpdated(refreshed)
-                            infoMsg = "Profile details synced."
-                        } catch (e: Exception) {
-                            errorMsg = e.message ?: "Sync failed."
-                        } finally {
-                            loading = false
-                        }
+            // 3. TWO SIDE-BY-SIDE CARDS: MY LIST & DOWNLOADS
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .height(46.dp)
+                        .clip(RoundedCornerShape(13.dp))
+                        .background(
+                            Brush.horizontalGradient(listOf(Color(0xFF171923), Color(0xFF21131B)))
+                        )
+                        .border(1.dp, Color(0xFF44222D), RoundedCornerShape(13.dp))
+                        .clickable { onOpenMyList() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("♡", color = White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.width(8.dp))
+                        Text("My List ($myListCount)", color = White, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
                     }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !loading
-            )
+                }
 
-            Spacer(Modifier.height(11.dp))
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .height(46.dp)
+                        .clip(RoundedCornerShape(13.dp))
+                        .background(
+                            Brush.horizontalGradient(listOf(Color(0xFF171923), Color(0xFF21131B)))
+                        )
+                        .border(1.dp, Color(0xFF44222D), RoundedCornerShape(13.dp))
+                        .clickable { onOpenDownloads() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("↓", color = White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Downloads", color = White, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
 
+            Spacer(Modifier.height(10.dp))
+
+            // 4. FULL-WIDTH SYNC PROFILE & CLOUD DATA BAR
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .height(36.dp)
-                    .clip(RoundedCornerShape(9.dp))
-                    .background(if (loading) Color(0xFF7A1529) else AccentRed)
+                    .padding(horizontal = 14.dp)
+                    .height(46.dp)
+                    .clip(RoundedCornerShape(13.dp))
+                    .background(
+                        Brush.horizontalGradient(listOf(Color(0xFF171923), Color(0xFF26121A)))
+                    )
+                    .border(1.dp, Color(0xFF5A1D2B), RoundedCornerShape(13.dp))
+                    .clickable(enabled = !loading) {
+                        loading = true
+                        errorMsg = null
+                        infoMsg = null
+                        scope.launch {
+                            try {
+                                val refreshed = supabaseFetchProfile(session)
+                                onSessionUpdated(refreshed)
+                                infoMsg = "Profile details synced."
+                            } catch (e: Exception) {
+                                errorMsg = e.message ?: "Sync failed."
+                            } finally {
+                                loading = false
+                            }
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("↻", color = White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        if (loading) "Syncing..." else "Sync Profile & Cloud Data",
+                        color = White,
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            // 5. FULL-WIDTH CRIMSON LOGOUT BUTTON
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp)
+                    .height(46.dp)
+                    .clip(RoundedCornerShape(13.dp))
+                    .background(
+                        Brush.horizontalGradient(listOf(Color(0xFFE51937), Color(0xFFFF1744)))
+                    )
                     .clickable(enabled = !loading) {
                         loading = true
                         scope.launch {
@@ -3188,23 +3395,63 @@ fun ProfileScreen(
                     },
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    if (loading) "LOGGING OUT..." else "LOGOUT",
-                    color = White,
-                    fontSize = 11.5.sp,
-                    fontWeight = FontWeight.ExtraBold
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("➔", color = White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        if (loading) "LOGGING OUT..." else "LOGOUT",
+                        color = White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = 0.8.sp
+                    )
+                }
             }
         }
 
         Spacer(Modifier.height(14.dp))
-        SupportSection()
-        Spacer(Modifier.height(20.dp))
+        Box(Modifier.padding(horizontal = 14.dp)) {
+            SupportSection(onOpenFaq = { showFaqDialog = true })
+        }
+        Spacer(Modifier.height(22.dp))
     }
 }
 
 @Composable
-fun SupportSection() {
+private fun ProfileDetailRow(icon: String, label: String, value: String) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 5.5.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier.width(22.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            Text(icon, color = Gray, fontSize = 12.sp)
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = label,
+            color = Gray,
+            fontSize = 12.sp,
+            modifier = Modifier.width(118.dp)
+        )
+        Text(
+            text = value,
+            color = White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+@Composable
+fun SupportSection(onOpenFaq: () -> Unit = {}) {
     val context = LocalContext.current
 
     fun openLink(intent: Intent) {
@@ -3217,83 +3464,161 @@ fun SupportSection() {
 
     fun openUrl(url: String) = openLink(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
 
-    Column(
+    Row(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(18.dp))
-            .background(Brush.verticalGradient(listOf(Color(0xFF171A24), Color(0xFF10121A))))
-            .border(1.dp, Color(0xFF292D3A), RoundedCornerShape(18.dp))
-            .padding(horizontal = 16.dp, vertical = 15.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier.width(3.dp).height(19.dp)
-                    .clip(RoundedCornerShape(2.dp)).background(AccentRed)
+            .background(
+                Brush.horizontalGradient(listOf(Color(0xFF1A1016), Color(0xFF12141E)))
             )
-            Spacer(Modifier.width(9.dp))
-            Column(Modifier.weight(1f)) {
-                Text("SUPPORT CENTER", color = White, fontSize = 12.sp,
-                    fontWeight = FontWeight.ExtraBold, letterSpacing = 1.1.sp)
-                Spacer(Modifier.height(2.dp))
-                Text("Connect with the AniStream team", color = Gray, fontSize = 10.sp)
-            }
+            .border(1.dp, Color(0xFF3E1D28), RoundedCornerShape(18.dp))
+    ) {
+        // Left Anime Mascot Banner Strip
+        Box(
+            Modifier
+                .width(86.dp)
+                .height(142.dp)
+                .background(Color(0xFF231018))
+        ) {
+            AsyncImage(
+                model = "https://api.dicebear.com/9.x/adventurer/png?seed=Naruto&backgroundColor=b91c1c",
+                contentDescription = "Support Mascot",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
             Box(
-                Modifier.clip(RoundedCornerShape(20.dp))
-                    .background(Color(0xFF28121B))
-                    .padding(horizontal = 9.dp, vertical = 5.dp)
-            ) {
-                Text("WE'RE HERE", color = AccentRed, fontSize = 8.sp, fontWeight = FontWeight.Bold)
-            }
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.horizontalGradient(
+                            colors = listOf(Color.Transparent, Color(0xCC16121A))
+                        )
+                    )
+            )
         }
 
-        Spacer(Modifier.height(15.dp))
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically
+        // Right Support Header + 4 Action Tiles
+        Column(
+            Modifier
+                .weight(1f)
+                .padding(start = 8.dp, end = 12.dp, top = 12.dp, bottom = 12.dp)
         ) {
-            SupportTile(SolidColor(Color(0xFF20212D)), { openUrl(SUPPORT_INSTAGRAM_URL) }) {
-                Text("◎", color = Color(0xFFE66AA7), fontSize = 25.sp, fontWeight = FontWeight.Medium)
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier
+                            .width(3.dp)
+                            .height(15.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(AccentRed)
+                    )
+                    Spacer(Modifier.width(7.dp))
+                    Text("Support", color = White, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+                }
+
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color(0xFF1C1F2B))
+                        .border(1.dp, Color(0xFF34384A), RoundedCornerShape(20.dp))
+                        .clickable { onOpenFaq() }
+                        .padding(horizontal = 9.dp, vertical = 4.dp)
+                ) {
+                    Text("🎧 Need Help? ›", color = White, fontSize = 9.5.sp, fontWeight = FontWeight.SemiBold)
+                }
             }
-            SupportTile(SolidColor(Color(0xFF20212D)), { openUrl(SUPPORT_WHATSAPP_URL) }) {
-                Text("◉", color = Color(0xFF42D889), fontSize = 23.sp, fontWeight = FontWeight.Bold)
-            }
-            SupportTile(SolidColor(Color(0xFF20212D)), { openUrl(SUPPORT_TELEGRAM_URL) }) {
-                Text("➤", color = Color(0xFF55BDEB), fontSize = 22.sp, fontWeight = FontWeight.Bold)
-            }
-            SupportTile(SolidColor(Color(0xFF20212D)), {
-                openLink(Intent(
-                    Intent.ACTION_SENDTO,
-                    Uri.parse("mailto:$SUPPORT_EMAIL?subject=" + Uri.encode("AniStream Support"))
-                ))
-            }) {
-                Text("✉", color = Color(0xFFFF7777), fontSize = 21.sp, fontWeight = FontWeight.Bold)
+
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Get help, contact us or follow for updates",
+                color = Gray,
+                fontSize = 10.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Spacer(Modifier.height(10.dp))
+
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                SupportActionTile(
+                    icon = "◉",
+                    iconColor = Color(0xFF42D889),
+                    label = "WhatsApp",
+                    modifier = Modifier.weight(1f),
+                    onClick = { openUrl(SUPPORT_WHATSAPP_URL) }
+                )
+                SupportActionTile(
+                    icon = "➤",
+                    iconColor = Color(0xFF55BDEB),
+                    label = "Telegram",
+                    modifier = Modifier.weight(1f),
+                    onClick = { openUrl(SUPPORT_TELEGRAM_URL) }
+                )
+                SupportActionTile(
+                    icon = "✉",
+                    iconColor = AccentRed,
+                    label = "Email Us",
+                    modifier = Modifier.weight(1f),
+                    onClick = {
+                        openLink(
+                            Intent(
+                                Intent.ACTION_SENDTO,
+                                Uri.parse("mailto:$SUPPORT_EMAIL?subject=" + Uri.encode("AniStream Support"))
+                            )
+                        )
+                    }
+                )
+                SupportActionTile(
+                    icon = "?",
+                    iconColor = AccentRed,
+                    label = "FAQ",
+                    modifier = Modifier.weight(1f),
+                    onClick = onOpenFaq
+                )
             }
         }
-        Spacer(Modifier.height(10.dp))
-        Text("Instagram  •  WhatsApp  •  Telegram  •  Email",
-            color = Color(0xFF777B89), fontSize = 9.sp, textAlign = TextAlign.Center)
     }
 }
 
 @Composable
-private fun SupportTile(
-    background: Brush,
-    onClick: () -> Unit,
-    content: @Composable BoxScope.() -> Unit
+private fun SupportActionTile(
+    icon: String,
+    iconColor: Color,
+    label: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
 ) {
-    Box(
-        Modifier
-            .size(46.dp)
-            .clip(RoundedCornerShape(13.dp))
-            .background(background)
-            .border(1.dp, Color(0xFF343847), RoundedCornerShape(13.dp))
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-        content = content
-    )
+    Column(
+        modifier = modifier
+            .height(56.dp)
+            .clip(RoundedCornerShape(11.dp))
+            .background(Color(0xFF171923))
+            .border(1.dp, Color(0xFF2D3142), RoundedCornerShape(11.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 2.dp, vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(icon, color = iconColor, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+        Spacer(Modifier.height(3.dp))
+        Text(
+            text = label,
+            color = Color(0xFFD5D8E4),
+            fontSize = 8.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
 }
+
 
 /* ================= COMMUNITY CHAT ================= */
 data class ChatMessage(
