@@ -14,6 +14,11 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.ui.graphics.StrokeJoin
 import android.Manifest
@@ -1211,31 +1216,32 @@ fun AniStreamApp() {
             bottomBar = {
                 if (selectedAnime == null && offlineDownload == null && !(tab == 5 && imeVisible)) {
                     NavigationBar(
-                        modifier = Modifier.border(
-                            width = 0.7.dp,
-                            color = Color(0xFF6E1429),
-                            shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)
-                        ),
+                        modifier = Modifier
+                            .border(
+                                width = 1.dp,
+                                color = Color(0xFF8F1836),
+                                shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)
+                            ),
                         containerColor = Color(0xFF090A10),
                         tonalElevation = 0.dp
                     ) {
-                        // Five-item bottom navigation. Chat is intentionally not shown here.
+                        // Five-item premium bottom navigation. Chat is intentionally not shown.
                         val navItems = listOf(
-                            Triple("Home", "⌂", 0),
-                            Triple("Search", "⌕", 1),
-                            Triple("My List", "♡", 2),
-                            Triple("Downloads", "↓", 3),
-                            Triple("Profile", "♙", 4)
+                            Triple("Home", 0, Icons.Filled.Home),
+                            Triple("Search", 1, Icons.Filled.Search),
+                            Triple("My List", 2, if (tab == 2) Icons.Filled.Favorite else Icons.Filled.Favorite),
+                            Triple("Downloads", 3, Icons.Filled.Download),
+                            Triple("Profile", 4, Icons.Filled.Person)
                         )
-                        navItems.forEach { (label, icon, target) ->
+                        navItems.forEach { (label, target, navIcon) ->
                             NavigationBarItem(
                                 selected = tab == target,
                                 onClick = { tab = target },
-                                icon = { Text(icon, fontSize = 18.sp) },
-                                label = { Text(label, fontSize = 9.5.sp, maxLines = 1) },
+                                icon = { Icon(navIcon, contentDescription = label, modifier = Modifier.size(21.dp)) },
+                                label = { Text(label, fontSize = 9.5.sp, maxLines = 1, fontWeight = if (tab == target) FontWeight.Bold else FontWeight.Medium) },
                                 colors = NavigationBarItemDefaults.colors(
                                     selectedIconColor = AccentRed, selectedTextColor = AccentRed,
-                                    indicatorColor = Color(0xFF281822), unselectedIconColor = Gray, unselectedTextColor = Gray
+                                    indicatorColor = Color(0xFF28101B), unselectedIconColor = Color(0xFF9295A2), unselectedTextColor = Color(0xFF9295A2)
                                 )
                             )
                         }
@@ -2762,6 +2768,7 @@ fun ProfileScreen(
     Column(
         Modifier
             .fillMaxSize()
+            .background(Brush.verticalGradient(listOf(Color(0xFF160810), Background, Color(0xFF08090D))))
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
@@ -3023,26 +3030,36 @@ fun ProfileScreen(
                     .clip(RoundedCornerShape(18.dp))
                     .background(
                         Brush.linearGradient(
-                            listOf(Color(0xFF28101A), Color(0xFF15131D), Color(0xFF10121A))
+                            colors = listOf(Color(0xFF4A0D22), Color(0xFF21101B), Color(0xFF10121A)),
+                            start = Offset(0f, 0f),
+                            end = Offset(900f, 520f)
                         )
                     )
-                    .border(1.dp, Color(0xFF9B1838), RoundedCornerShape(18.dp))
+                    .border(1.dp, Color(0xFFFF1744), RoundedCornerShape(20.dp))
                     .padding(16.dp)
             ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(8.dp).clip(CircleShape).background(AccentRed))
+                    Spacer(Modifier.width(7.dp))
+                    Text("ANISTREAM HINDI", color = White, fontSize = 10.sp, fontWeight = FontWeight.Black, letterSpacing = 1.2.sp)
+                    Spacer(Modifier.weight(1f))
+                    Text("PROFILE", color = AccentRed, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp)
+                }
+                Spacer(Modifier.height(13.dp))
                 Row(
                     Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(
                         Modifier
-                            .size(62.dp)
+                            .size(68.dp)
                             .clickable { showAvatarDialog = true }
                     ) {
                         UserAvatarView(
                             avatarUrl = session.avatarUrl,
                             fallbackInitial = initial,
-                            size = 58.dp,
-                            fontSize = 22.sp,
+                            size = 64.dp,
+                            fontSize = 24.sp,
                             modifier = Modifier
                                 .clip(CircleShape)
                                 .border(1.5.dp, AccentRed, CircleShape)
@@ -3120,12 +3137,16 @@ fun ProfileScreen(
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(18.dp))
                     .background(
-                        Brush.verticalGradient(listOf(Color(0xFF19131D), Color(0xFF10121A)))
+                        Brush.verticalGradient(listOf(Color(0xFF21121C), Color(0xFF10121A)))
                     )
-                    .border(1.dp, Color(0xFF74203A), RoundedCornerShape(18.dp))
+                    .border(1.dp, Color(0xFFB51D43), RoundedCornerShape(18.dp))
                     .padding(16.dp)
             ) {
-                Text("ACCOUNT DETAILS", color = AccentRed, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.7.sp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.width(4.dp).height(20.dp).clip(RoundedCornerShape(3.dp)).background(AccentRed))
+                    Spacer(Modifier.width(9.dp))
+                    Text("Account Details", color = White, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+                }
                 Spacer(Modifier.height(8.dp))
                 InfoLine("Full Name", session.fullName.ifBlank { "Not set" })
                 InfoLine("Username", if (session.username.isBlank()) "Not set" else "@${session.username}")
@@ -3266,13 +3287,13 @@ fun SupportSection() {
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            SupportTile(SolidColor(Color(0xFF20212D)), { openUrl(SUPPORT_INSTAGRAM_URL) }) {
+            SupportTile(SolidColor(Color(0xFF20212D)), { openUrl(SUPPORT_INSTAGRAM_URL) }, label = "Instagram") {
                 Text("◎", color = Color(0xFFE66AA7), fontSize = 25.sp, fontWeight = FontWeight.Medium)
             }
-            SupportTile(SolidColor(Color(0xFF20212D)), { openUrl(SUPPORT_WHATSAPP_URL) }) {
+            SupportTile(SolidColor(Color(0xFF20212D)), { openUrl(SUPPORT_WHATSAPP_URL) }, label = "WhatsApp") {
                 Text("◉", color = Color(0xFF42D889), fontSize = 23.sp, fontWeight = FontWeight.Bold)
             }
-            SupportTile(SolidColor(Color(0xFF20212D)), { openUrl(SUPPORT_TELEGRAM_URL) }) {
+            SupportTile(SolidColor(Color(0xFF20212D)), { openUrl(SUPPORT_TELEGRAM_URL) }, label = "Telegram") {
                 Text("➤", color = Color(0xFF55BDEB), fontSize = 22.sp, fontWeight = FontWeight.Bold)
             }
             SupportTile(SolidColor(Color(0xFF20212D)), {
@@ -3280,32 +3301,38 @@ fun SupportSection() {
                     Intent.ACTION_SENDTO,
                     Uri.parse("mailto:$SUPPORT_EMAIL?subject=" + Uri.encode("AniStream Support"))
                 ))
-            }) {
+            }, label = "Gmail") {
                 Text("✉", color = Color(0xFFFF7777), fontSize = 21.sp, fontWeight = FontWeight.Bold)
             }
         }
-        Spacer(Modifier.height(10.dp))
-        Text("Instagram  •  WhatsApp  •  Telegram  •  Gmail",
-            color = Color(0xFF777B89), fontSize = 9.sp, textAlign = TextAlign.Center)
     }
 }
 
 @Composable
-private fun SupportTile(
+private fun RowScope.SupportTile(
     background: Brush,
     onClick: () -> Unit,
+    label: String,
     content: @Composable BoxScope.() -> Unit
 ) {
-    Box(
-        Modifier
-            .size(46.dp)
-            .clip(RoundedCornerShape(13.dp))
-            .background(background)
-            .border(1.dp, Color(0xFF343847), RoundedCornerShape(13.dp))
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-        content = content
-    )
+    Column(
+        Modifier.weight(1f),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .clip(RoundedCornerShape(13.dp))
+                .background(background)
+                .border(1.dp, Color(0xFF343847), RoundedCornerShape(13.dp))
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center,
+            content = content
+        )
+        Spacer(Modifier.height(5.dp))
+        Text(label, color = Color(0xFFB9BBC5), fontSize = 9.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+    }
 }
 
 /* ================= COMMUNITY CHAT ================= */
@@ -3648,8 +3675,9 @@ fun SearchScreen(
     }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 6.dp)) {
-        Text("Search Anime", color = White, fontSize = 21.sp, fontWeight = FontWeight.ExtraBold)
-        Spacer(Modifier.height(8.dp))
+        Text("Discover Anime", color = White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+        Text("Find your next favourite series or movie", color = Gray, fontSize = 11.sp)
+        Spacer(Modifier.height(10.dp))
         OutlinedTextField(
             value = searchText,
             onValueChange = onSearchChange,
@@ -3711,7 +3739,8 @@ fun SearchScreen(
                         Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(11.dp))
-                            .background(SurfaceDark)
+                            .background(Brush.horizontalGradient(listOf(Color(0xFF1B1721), SurfaceDark)))
+                            .border(0.7.dp, Color(0xFF3A2431), RoundedCornerShape(11.dp))
                             .clickable { onAnimeClick(anime) }
                             .padding(9.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -5294,8 +5323,8 @@ fun DownloadsScreen(onPlay: (DownloadInfo) -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("My Downloads", color = White, fontSize = 21.sp, fontWeight = FontWeight.ExtraBold)
-                Text("Saved in Downloads/AniStream • ${downloads.size} items", color = Gray, fontSize = 11.sp)
+                Text("Downloads", color = White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+                Text("Your offline anime library • ${downloads.size} items", color = Gray, fontSize = 11.sp)
             }
             if (failedItems.isNotEmpty()) {
                 SmallOutlineButton(
@@ -5339,7 +5368,8 @@ fun DownloadsScreen(onPlay: (DownloadInfo) -> Unit) {
                     .fillMaxWidth()
                     .padding(bottom = 10.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(SurfaceDark)
+                    .background(Brush.horizontalGradient(listOf(Color(0xFF1B1721), SurfaceDark)))
+                    .border(0.8.dp, Color(0xFF462234), RoundedCornerShape(12.dp))
                     .padding(12.dp)
             ) {
                 Text(item.title, color = White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
