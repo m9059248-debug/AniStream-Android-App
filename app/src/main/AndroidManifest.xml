@@ -16,20 +16,10 @@
             android:exported="true"
             android:launchMode="singleTask"
             android:configChanges="orientation|screenSize|keyboardHidden">
-
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-
-            <!-- Google login se wapas aane ke liye -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="anistream" android:host="auth-callback" />
-            </intent-filter>
-
         </activity>
 
         <service
@@ -41,5 +31,4 @@
         </service>
 
     </application>
-
 </manifest>
