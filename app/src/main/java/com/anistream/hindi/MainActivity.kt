@@ -3013,9 +3013,10 @@ fun ProfileScreen(
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
+                    .clip(RoundedCornerShape(18.dp))
                     .background(SurfaceDark)
-                    .padding(15.dp)
+                    .border(1.dp, Color(0xFF242733), RoundedCornerShape(18.dp))
+                    .padding(16.dp)
             ) {
                 Row(
                     Modifier.fillMaxWidth(),
@@ -3106,11 +3107,12 @@ fun ProfileScreen(
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(15.dp))
+                    .clip(RoundedCornerShape(18.dp))
                     .background(SurfaceDark)
-                    .padding(15.dp)
+                    .border(1.dp, Color(0xFF242733), RoundedCornerShape(18.dp))
+                    .padding(16.dp)
             ) {
-                Text("ACCOUNT DETAILS", color = AccentRed, fontSize = 10.5.sp, fontWeight = FontWeight.ExtraBold)
+                Text("ACCOUNT DETAILS", color = AccentRed, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.7.sp)
                 Spacer(Modifier.height(8.dp))
                 InfoLine("Full Name", session.fullName.ifBlank { "Not set" })
                 InfoLine("Username", if (session.username.isBlank()) "Not set" else "@${session.username}")
@@ -3173,7 +3175,7 @@ fun ProfileScreen(
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .height(40.dp)
+                    .height(36.dp)
                     .clip(RoundedCornerShape(9.dp))
                     .background(if (loading) Color(0xFF7A1529) else AccentRed)
                     .clickable(enabled = !loading) {
@@ -3189,7 +3191,7 @@ fun ProfileScreen(
                 Text(
                     if (loading) "LOGGING OUT..." else "LOGOUT",
                     color = White,
-                    fontSize = 12.sp,
+                    fontSize = 11.5.sp,
                     fontWeight = FontWeight.ExtraBold
                 )
             }
@@ -3218,150 +3220,60 @@ fun SupportSection() {
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(SurfaceDark)
-            .border(1.dp, Color(0xFF2D2F3E), RoundedCornerShape(16.dp))
-            .padding(horizontal = 14.dp, vertical = 12.dp),
+            .clip(RoundedCornerShape(18.dp))
+            .background(Brush.verticalGradient(listOf(Color(0xFF171A24), Color(0xFF10121A))))
+            .border(1.dp, Color(0xFF292D3A), RoundedCornerShape(18.dp))
+            .padding(horizontal = 16.dp, vertical = 15.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Box(
-                Modifier
-                    .width(3.dp)
-                    .height(14.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(AccentRed)
+                Modifier.width(3.dp).height(19.dp)
+                    .clip(RoundedCornerShape(2.dp)).background(AccentRed)
             )
-            Spacer(Modifier.width(8.dp))
-            Text("SUPPORT", color = White, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.5.sp)
+            Spacer(Modifier.width(9.dp))
+            Column(Modifier.weight(1f)) {
+                Text("SUPPORT CENTER", color = White, fontSize = 12.sp,
+                    fontWeight = FontWeight.ExtraBold, letterSpacing = 1.1.sp)
+                Spacer(Modifier.height(2.dp))
+                Text("Connect with the AniStream team", color = Gray, fontSize = 10.sp)
+            }
+            Box(
+                Modifier.clip(RoundedCornerShape(20.dp))
+                    .background(Color(0xFF28121B))
+                    .padding(horizontal = 9.dp, vertical = 5.dp)
+            ) {
+                Text("WE'RE HERE", color = AccentRed, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+            }
         }
 
-        Spacer(Modifier.height(12.dp))
-
+        Spacer(Modifier.height(15.dp))
         Row(
             Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(22.dp, Alignment.CenterHorizontally),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Instagram
-            SupportTile(
-                background = Brush.linearGradient(
-                    colors = listOf(
-                        Color(0xFFFEDA75), Color(0xFFFA7E1E), Color(0xFFD62976),
-                        Color(0xFF962FBF), Color(0xFF4F5BD5)
-                    ),
-                    start = Offset(0f, Float.POSITIVE_INFINITY),
-                    end = Offset(Float.POSITIVE_INFINITY, 0f)
-                ),
-                onClick = { openUrl(SUPPORT_INSTAGRAM_URL) }
-            ) {
-                Canvas(Modifier.fillMaxSize()) {
-                    val u = size.minDimension / 24f
-                    drawRoundRect(
-                        color = Color.White,
-                        topLeft = Offset(4.5f * u, 4.5f * u),
-                        size = Size(15f * u, 15f * u),
-                        cornerRadius = CornerRadius(4.5f * u, 4.5f * u),
-                        style = Stroke(width = 1.8f * u)
-                    )
-                    drawCircle(
-                        color = Color.White,
-                        radius = 3.6f * u,
-                        center = Offset(12f * u, 12f * u),
-                        style = Stroke(width = 1.8f * u)
-                    )
-                    drawCircle(
-                        color = Color.White,
-                        radius = 1.0f * u,
-                        center = Offset(16.3f * u, 7.7f * u)
-                    )
-                }
+            SupportTile(SolidColor(Color(0xFF20212D)), { openUrl(SUPPORT_INSTAGRAM_URL) }) {
+                Text("◎", color = Color(0xFFE66AA7), fontSize = 25.sp, fontWeight = FontWeight.Medium)
             }
-
-            // WhatsApp
-            SupportTile(
-                background = SolidColor(Color(0xFF25D366)),
-                onClick = { openUrl(SUPPORT_WHATSAPP_URL) }
-            ) {
-                Canvas(Modifier.fillMaxSize()) {
-                    val u = size.minDimension / 24f
-                    drawCircle(
-                        color = Color.White,
-                        radius = 7.4f * u,
-                        center = Offset(12f * u, 11.6f * u),
-                        style = Stroke(width = 1.9f * u)
-                    )
-                    val tail = androidx.compose.ui.graphics.Path().apply {
-                        moveTo(4.6f * u, 19.6f * u)
-                        lineTo(5.9f * u, 14.8f * u)
-                        lineTo(9.4f * u, 18.0f * u)
-                        close()
-                    }
-                    drawPath(tail, Color.White)
-                }
-                Icon(
-                    imageVector = Icons.Filled.Call,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(12.dp)
-                )
+            SupportTile(SolidColor(Color(0xFF20212D)), { openUrl(SUPPORT_WHATSAPP_URL) }) {
+                Text("◉", color = Color(0xFF42D889), fontSize = 23.sp, fontWeight = FontWeight.Bold)
             }
-
-            // Telegram
-            SupportTile(
-                background = SolidColor(Color(0xFF229ED9)),
-                onClick = { openUrl(SUPPORT_TELEGRAM_URL) }
-            ) {
-                Canvas(Modifier.fillMaxSize()) {
-                    val u = size.minDimension / 24f
-                    val plane = androidx.compose.ui.graphics.Path().apply {
-                        moveTo(4.2f * u, 11.6f * u)
-                        lineTo(19.6f * u, 5.4f * u)
-                        lineTo(16.9f * u, 18.6f * u)
-                        lineTo(12.4f * u, 15.2f * u)
-                        lineTo(10.0f * u, 17.6f * u)
-                        lineTo(9.6f * u, 13.4f * u)
-                        close()
-                    }
-                    drawPath(plane, Color.White)
-                    drawLine(
-                        color = Color(0xFF229ED9),
-                        start = Offset(9.8f * u, 13.4f * u),
-                        end = Offset(16.8f * u, 8.4f * u),
-                        strokeWidth = 1.1f * u
-                    )
-                }
+            SupportTile(SolidColor(Color(0xFF20212D)), { openUrl(SUPPORT_TELEGRAM_URL) }) {
+                Text("➤", color = Color(0xFF55BDEB), fontSize = 22.sp, fontWeight = FontWeight.Bold)
             }
-
-            // Gmail
-            SupportTile(
-                background = SolidColor(Color.White),
-                onClick = {
-                    openLink(
-                        Intent(
-                            Intent.ACTION_SENDTO,
-                            Uri.parse("mailto:$SUPPORT_EMAIL?subject=" + Uri.encode("AniStream Support"))
-                        )
-                    )
-                }
-            ) {
-                Canvas(Modifier.fillMaxSize()) {
-                    val u = size.minDimension / 24f
-                    val m = androidx.compose.ui.graphics.Path().apply {
-                        moveTo(4.8f * u, 18.2f * u)
-                        lineTo(4.8f * u, 7.2f * u)
-                        lineTo(12f * u, 12.8f * u)
-                        lineTo(19.2f * u, 7.2f * u)
-                        lineTo(19.2f * u, 18.2f * u)
-                    }
-                    drawPath(
-                        path = m,
-                        color = Color(0xFFEA4335),
-                        style = Stroke(width = 2.6f * u, cap = StrokeCap.Round, join = StrokeJoin.Round)
-                    )
-                }
+            SupportTile(SolidColor(Color(0xFF20212D)), {
+                openLink(Intent(
+                    Intent.ACTION_SENDTO,
+                    Uri.parse("mailto:$SUPPORT_EMAIL?subject=" + Uri.encode("AniStream Support"))
+                ))
+            }) {
+                Text("✉", color = Color(0xFFFF7777), fontSize = 21.sp, fontWeight = FontWeight.Bold)
             }
         }
+        Spacer(Modifier.height(10.dp))
+        Text("Instagram  •  WhatsApp  •  Telegram  •  Email",
+            color = Color(0xFF777B89), fontSize = 9.sp, textAlign = TextAlign.Center)
     }
 }
 
@@ -3373,9 +3285,10 @@ private fun SupportTile(
 ) {
     Box(
         Modifier
-            .size(40.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .size(46.dp)
+            .clip(RoundedCornerShape(13.dp))
             .background(background)
+            .border(1.dp, Color(0xFF343847), RoundedCornerShape(13.dp))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
         content = content
@@ -5590,18 +5503,18 @@ fun SmallOutlineButton(
 
     Box(
         modifier = modifier
-            .heightIn(min = 35.dp)
+            .heightIn(min = 33.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(bgColor)
             .border(1.dp, borderColor, RoundedCornerShape(8.dp))
             .clickable(enabled = enabled) { onClick() }
-            .padding(horizontal = 12.dp, vertical = 7.dp),
+            .padding(horizontal = 10.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = text,
             color = txtColor,
-            fontSize = 11.sp,
+            fontSize = 10.5.sp,
             fontWeight = FontWeight.Bold,
             maxLines = 1
         )
