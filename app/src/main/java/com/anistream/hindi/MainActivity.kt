@@ -3278,10 +3278,10 @@ fun ProfileScreen(
             Spacer(Modifier.height(12.dp))
 
             infoMsg?.let {
-                Text(it, color = Color(0xFF4CAF50), fontSize = 11.5.sp, modifier = Modifier.padding(horizontal = 16.dp, bottom = 6.dp))
+                Text(it, color = Color(0xFF4CAF50), fontSize = 11.5.sp, modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 6.dp))
             }
             errorMsg?.let {
-                Text(it, color = AccentRed, fontSize = 11.5.sp, modifier = Modifier.padding(horizontal = 16.dp, bottom = 6.dp))
+                Text(it, color = AccentRed, fontSize = 11.5.sp, modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 6.dp))
             }
 
             // 3. TWO SIDE-BY-SIDE CARDS: MY LIST & DOWNLOADS
