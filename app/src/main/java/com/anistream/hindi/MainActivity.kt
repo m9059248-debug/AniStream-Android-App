@@ -4458,8 +4458,16 @@ fun WatchPlayer(
     val context = LocalContext.current
     val activity = context as? Activity
 
-    val isWebPage = remember(videoUrl) {
-        val lower = videoUrl.lowercase()
+    // Admin may save either the direct embed URL or the full iframe snippet.
+    // WebView must receive the iframe src URL, not the HTML snippet itself.
+    val embedUrl = remember(videoUrl) {
+        val iframeSrc = Regex("""(?i)<iframe[^>]*\bsrc\s*=\s*[\"']([^\"']+)[\"']""")
+            .find(videoUrl)?.groupValues?.getOrNull(1)
+        (iframeSrc ?: videoUrl).trim()
+    }
+
+    val isWebPage = remember(embedUrl) {
+        val lower = embedUrl.lowercase()
         !(lower.contains(".mp4") || lower.contains(".m3u8") || lower.contains(".mpd") || lower.contains(".mkv") || lower.contains(".webm"))
     }
 
@@ -4519,7 +4527,7 @@ fun WatchPlayer(
                 factory = { ctx ->
                     WebView(ctx).apply {
                         webHolder[0] = this
-                        tag = videoUrl
+                        tag = embedUrl
                         pageDone[0] = false
                         layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                         settings.javaScriptEnabled = true
@@ -4577,19 +4585,21 @@ fun WatchPlayer(
                                 // intent:// market:// jaise links block
                                 if (scheme != "http" && scheme != "https") return true
                                 // Pehla page load hone ke baad doosri website par jaane wale (ads/popup) redirects block
-                                val startHost = Uri.parse((view?.tag as? String) ?: videoUrl).host
-                                if (pageDone[0] && request.isForMainFrame && u.host != startHost) return true
+                                val startHost = Uri.parse((view?.tag as? String) ?: embedUrl).host
+                                val allowedPlayerHost = u.host.equals("player.abyssplayer.com", ignoreCase = true)
+                                // Keep top-level navigation on the original embed host; explicitly allow Abyss player host.
+                                if (pageDone[0] && request.isForMainFrame && u.host != startHost && !allowedPlayerHost) return true
                                 return false
                             }
                         }
-                        loadUrl(videoUrl)
+                        loadUrl(embedUrl)
                     }
                 },
                 update = {
-                    if (it.tag != videoUrl) {
-                        it.tag = videoUrl
+                    if (it.tag != embedUrl) {
+                        it.tag = embedUrl
                         pageDone[0] = false
-                        it.loadUrl(videoUrl)
+                        it.loadUrl(embedUrl)
                     }
                 },
                 modifier = Modifier.fillMaxSize()
