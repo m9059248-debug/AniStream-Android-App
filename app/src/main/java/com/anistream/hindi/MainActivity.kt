@@ -1,10 +1,6 @@
 package com.anistream.hindi
 
 import android.app.Activity
-import android.webkit.WebSettings
-import android.view.View
-import android.webkit.WebResourceRequest
-import android.webkit.CookieManager
 import kotlinx.coroutines.sync.withLock
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -18,6 +14,11 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.ui.graphics.StrokeJoin
 import android.Manifest
@@ -233,14 +234,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setupNewAnimeNotifications()
-        parseOAuthIntent(intent)?.let { oauthCallback = it }
         setContent { AniStreamApp() }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        parseOAuthIntent(intent)?.let { oauthCallback = it }
     }
 
     private fun setupNewAnimeNotifications() {
@@ -679,45 +678,7 @@ private fun parseUserSession(root: JSONObject, fallbackToken: String = "", fallb
     return UserSession(userId, email, fullName, token, createdAt, avatarUrl, username, bio, refresh)
 }
 
-/* ================= GOOGLE LOGIN (browser + Supabase) ================= */
-private const val GOOGLE_REDIRECT_URI = "anistream://auth-callback"
-
-data class OAuthCallback(val accessToken: String, val refreshToken: String, val error: String)
-
-// MainActivity yahan result rakhti hai, MainApp use dekh kar login complete karta hai
-private var oauthCallback by mutableStateOf<OAuthCallback?>(null)
-
-private fun parseOAuthIntent(intent: Intent?): OAuthCallback? {
-    val data = intent?.data ?: return null
-    if (data.scheme != "anistream" || data.host != "auth-callback") return null
-    val raw = data.fragment ?: data.encodedQuery.orEmpty()
-    val params = raw.split("&").mapNotNull { part ->
-        val i = part.indexOf('=')
-        if (i <= 0) null else Uri.decode(part.substring(0, i)) to Uri.decode(part.substring(i + 1).replace("+", " "))
-    }.toMap()
-    intent?.data = null // same callback dobara process na ho
-    return OAuthCallback(
-        accessToken = params["access_token"].orEmpty(),
-        refreshToken = params["refresh_token"].orEmpty(),
-        error = params["error_description"] ?: params["error"].orEmpty()
-    )
-}
-
-private fun startGoogleLogin(context: Context) {
-    val url = "$SUPABASE_URL/auth/v1/authorize?provider=google&prompt=select_account&redirect_to=" + Uri.encode(GOOGLE_REDIRECT_URI)
-    try {
-        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-    } catch (e: Exception) {
-        Toast.makeText(context, "Could not open the browser.", Toast.LENGTH_SHORT).show()
-    }
-}
-
-private suspend fun supabaseSessionFromTokens(accessToken: String, refreshToken: String): UserSession = withContext(Dispatchers.IO) {
-    val res = request("$SUPABASE_URL/auth/v1/user", method = "GET", supabase = true, bearerToken = accessToken)
-    val obj = JSONObject(res).put("access_token", accessToken).put("refresh_token", refreshToken)
-    parseUserSession(obj)
-}
-
+/* ================= SUPABASE SESSION HELPERS ================= */
 /* LOGIN TOKEN REFRESH: Supabase login token ~1 ghante baad expire ho jata hai */
 private val refreshMutex = kotlinx.coroutines.sync.Mutex()
 @Volatile private var lastRefreshedSession: UserSession? = null
@@ -1166,26 +1127,6 @@ fun AniStreamApp() {
         }
     }
 
-    // Google login se wapas aane par login complete karo
-    val googleCallback = oauthCallback
-    LaunchedEffect(googleCallback) {
-        val cb = googleCallback ?: return@LaunchedEffect
-        oauthCallback = null
-        if (cb.accessToken.isBlank()) {
-            Toast.makeText(context, cb.error.ifBlank { "Google sign-in failed. Please try again." }, Toast.LENGTH_LONG).show()
-            return@LaunchedEffect
-        }
-        try {
-            val session = supabaseSessionFromTokens(cb.accessToken, cb.refreshToken)
-            userSession = session
-            saveUserSession(context, session)
-            tab = 4
-            Toast.makeText(context, "Logged in with Google", Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) {
-            Toast.makeText(context, e.message ?: "Google sign-in failed. Please try again.", Toast.LENGTH_LONG).show()
-        }
-    }
-
     // Login token expire hone se pehle (ya app khulte hi expire mila to) use refresh kar do
     LaunchedEffect(userSession?.userId) {
         if (userSession == null) return@LaunchedEffect
@@ -1214,25 +1155,33 @@ fun AniStreamApp() {
             containerColor = Background,
             bottomBar = {
                 if (selectedAnime == null && offlineDownload == null && !(tab == 5 && imeVisible)) {
-                    NavigationBar(containerColor = SurfaceDark, tonalElevation = 0.dp) {
-                        // (label, icon, tab number) — Profile ka tab number 4 hi rahta hai, Chat ka 5
+                    NavigationBar(
+                        modifier = Modifier
+                            .border(
+                                width = 1.dp,
+                                color = Color(0xFF8F1836),
+                                shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)
+                            ),
+                        containerColor = Color(0xFF090A10),
+                        tonalElevation = 0.dp
+                    ) {
+                        // Five-item premium bottom navigation. Chat is intentionally not shown.
                         val navItems = listOf(
-                            Triple("Home", "⌂", 0),
-                            Triple("Search", "⌕", 1),
-                            Triple("My List", "♡", 2),
-                            Triple("Downloads", "↓", 3),
-                            Triple("Chat", "💬", 5),
-                            Triple("Profile", "♙", 4)
+                            Triple("Home", 0, Icons.Filled.Home),
+                            Triple("Search", 1, Icons.Filled.Search),
+                            Triple("My List", 2, if (tab == 2) Icons.Filled.Favorite else Icons.Filled.Favorite),
+                            Triple("Downloads", 3, Icons.Filled.Download),
+                            Triple("Profile", 4, Icons.Filled.Person)
                         )
-                        navItems.forEach { (label, icon, target) ->
+                        navItems.forEach { (label, target, navIcon) ->
                             NavigationBarItem(
                                 selected = tab == target,
                                 onClick = { tab = target },
-                                icon = { Text(icon, fontSize = 18.sp) },
-                                label = { Text(label, fontSize = 9.5.sp, maxLines = 1) },
+                                icon = { Icon(navIcon, contentDescription = label, modifier = Modifier.size(21.dp)) },
+                                label = { Text(label, fontSize = 9.5.sp, maxLines = 1, fontWeight = if (tab == target) FontWeight.Bold else FontWeight.Medium) },
                                 colors = NavigationBarItemDefaults.colors(
                                     selectedIconColor = AccentRed, selectedTextColor = AccentRed,
-                                    indicatorColor = Color(0xFF281822), unselectedIconColor = Gray, unselectedTextColor = Gray
+                                    indicatorColor = Color(0xFF28101B), unselectedIconColor = Color(0xFF9295A2), unselectedTextColor = Color(0xFF9295A2)
                                 )
                             )
                         }
@@ -1255,96 +1204,59 @@ fun AniStreamApp() {
                         onBack = { selectedAnime = null }
                     )
                     else -> {
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .background(Color(0xFF0B0D13))
-                                .padding(horizontal = 12.dp, vertical = 9.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                        // Home screen header: only profile photo and name; no refresh, logo or category links.
+                        if (tab == 0) {
                             Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.clickable {
-                                    tab = 0
-                                    topNavCategory = "Home"
-                                }
-                            ) {
-                                Box(
-                                    Modifier
-                                        .clip(RoundedCornerShape(5.dp))
-                                        .background(AccentRed)
-                                        .padding(horizontal = 6.dp, vertical = 3.dp)
-                                ) {
-                                    Text("HD", color = White, fontSize = 9.sp, fontWeight = FontWeight.Black)
-                                }
-                                Spacer(Modifier.width(6.dp))
-                                Text("Ani", color = White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
-                                Text("Stream", color = AccentRed, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
-                            }
-
-                            Spacer(Modifier.width(10.dp))
-
-                            // Top Nav Links: Replaced "Home" button with "↻ Refresh" button
-                            Row(
-                                Modifier
-                                    .weight(1f)
-                                    .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(Color(0xFF090A10))
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                val navItems = listOf(
-                                    "Home" to "↻ Refresh",
-                                    "Ongoing" to "⚡ Ongoing",
-                                    "Series" to "📺 Series",
-                                    "Movies" to "🎬 Movies",
-                                    "All" to "📚 All Anime"
-                                )
-                                navItems.forEach { (key, label) ->
-                                    val active = tab == 0 && topNavCategory == key
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
                                     Text(
-                                        text = label,
-                                        color = if (active) White else Gray,
-                                        fontSize = 11.sp,
-                                        fontWeight = if (active) FontWeight.ExtraBold else FontWeight.Medium,
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(if (active) Color(0xFF23151D) else Color.Transparent)
-                                            .clickable {
-                                                tab = 0
-                                                topNavCategory = key
-                                                if (key == "Home") loadAllAnime()
-                                            }
-                                            .padding(horizontal = 7.dp, vertical = 4.dp)
+                                        text = "Ani",
+                                        color = White,
+                                        fontSize = 25.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        maxLines = 1
+                                    )
+                                    Text(
+                                        text = "Stream",
+                                        color = AccentRed,
+                                        fontSize = 25.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        maxLines = 1
                                     )
                                 }
-                            }
-
-                            Spacer(Modifier.width(8.dp))
-
-                            Row(
-                                Modifier
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .background(Color(0xFF1A1218))
-                                    .border(1.dp, AccentRed, RoundedCornerShape(20.dp))
-                                    .clickable { tab = 4 }
-                                    .padding(start = 4.dp, end = 9.dp, top = 3.dp, bottom = 3.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                UserAvatarView(
-                                    avatarUrl = userSession?.avatarUrl.orEmpty(),
-                                    fallbackInitial = badgeLetter,
-                                    size = 18.dp,
-                                    fontSize = 9.sp,
-                                    modifier = Modifier.clip(CircleShape)
-                                )
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    text = displayUserName,
-                                    color = White,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1
-                                )
+                                Row(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(28.dp))
+                                        .border(1.5.dp, AccentRed, RoundedCornerShape(28.dp))
+                                        .background(Color(0xFF160D14))
+                                        .clickable { tab = 4 }
+                                        .padding(start = 5.dp, end = 14.dp, top = 5.dp, bottom = 5.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    UserAvatarView(
+                                        avatarUrl = userSession?.avatarUrl.orEmpty(),
+                                        fallbackInitial = badgeLetter,
+                                        size = 38.dp,
+                                        fontSize = 15.sp,
+                                        modifier = Modifier.clip(CircleShape)
+                                    )
+                                    Spacer(Modifier.width(9.dp))
+                                    Text(
+                                        text = displayUserName,
+                                        color = White,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1
+                                    )
+                                }
                             }
                         }
 
@@ -2759,6 +2671,7 @@ fun ProfileScreen(
     Column(
         Modifier
             .fillMaxSize()
+            .background(Brush.verticalGradient(listOf(Color(0xFF160810), Background, Color(0xFF08090D))))
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
@@ -2988,28 +2901,7 @@ fun ProfileScreen(
                     }
                 }
 
-                Spacer(Modifier.height(10.dp))
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.weight(1f).height(1.dp).background(Color(0xFF2D2F3E)))
-                    Text("  or  ", color = Gray, fontSize = 11.sp)
-                    Box(Modifier.weight(1f).height(1.dp).background(Color(0xFF2D2F3E)))
-                }
-                Spacer(Modifier.height(10.dp))
-                val googleContext = LocalContext.current
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(40.dp)
-                        .clip(RoundedCornerShape(9.dp))
-                        .background(Color.White)
-                        .clickable(enabled = !loading) { startGoogleLogin(googleContext) },
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("G", color = Color(0xFF4285F4), fontSize = 16.sp, fontWeight = FontWeight.Black)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Continue with Google", color = Color(0xFF1F1F1F), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
+
             }
         } else {
             val initial = (session.fullName.firstOrNull() ?: session.email.firstOrNull() ?: 'A').uppercaseChar()
@@ -3017,38 +2909,53 @@ fun ProfileScreen(
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(SurfaceDark)
-                    .padding(15.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(Color(0xFF4A0D22), Color(0xFF21101B), Color(0xFF10121A)),
+                            start = Offset(0f, 0f),
+                            end = Offset(900f, 520f)
+                        )
+                    )
+                    .border(1.dp, Color(0xFFFF1744), RoundedCornerShape(20.dp))
+                    .padding(16.dp)
             ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(8.dp).clip(CircleShape).background(AccentRed))
+                    Spacer(Modifier.width(7.dp))
+                    Text("ANISTREAM HINDI", color = White, fontSize = 10.sp, fontWeight = FontWeight.Black, letterSpacing = 1.2.sp)
+                    Spacer(Modifier.weight(1f))
+                    Text("PROFILE", color = AccentRed, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp)
+                }
+                Spacer(Modifier.height(13.dp))
                 Row(
                     Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(
                         Modifier
-                            .size(50.dp)
+                            .size(68.dp)
                             .clickable { showAvatarDialog = true }
                     ) {
                         UserAvatarView(
                             avatarUrl = session.avatarUrl,
                             fallbackInitial = initial,
-                            size = 46.dp,
-                            fontSize = 18.sp,
+                            size = 64.dp,
+                            fontSize = 24.sp,
                             modifier = Modifier
                                 .clip(CircleShape)
                                 .border(1.5.dp, AccentRed, CircleShape)
                         )
                         Box(
                             Modifier
-                                .size(16.dp)
+                                .size(20.dp)
                                 .align(Alignment.BottomEnd)
                                 .clip(CircleShape)
                                 .background(AccentRed)
                                 .border(1.5.dp, SurfaceDark, CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text("✎", color = White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                            Text("✎", color = White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                         }
                     }
 
@@ -3071,10 +2978,10 @@ fun ProfileScreen(
                         Text(
                             session.fullName.ifBlank { "AniStream User" },
                             color = White,
-                            fontSize = 15.sp,
+                            fontSize = 18.sp,
                             fontWeight = FontWeight.ExtraBold
                         )
-                        Text(session.email, color = Gray, fontSize = 10.5.sp)
+                        Text(session.email, color = Gray, fontSize = 11.5.sp)
                         if (session.username.isNotBlank()) {
                             Text("@${session.username}", color = AccentRed, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                         }
@@ -3110,11 +3017,18 @@ fun ProfileScreen(
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(15.dp))
-                    .background(SurfaceDark)
-                    .padding(15.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(
+                        Brush.verticalGradient(listOf(Color(0xFF21121C), Color(0xFF10121A)))
+                    )
+                    .border(1.dp, Color(0xFFB51D43), RoundedCornerShape(18.dp))
+                    .padding(16.dp)
             ) {
-                Text("ACCOUNT DETAILS", color = AccentRed, fontSize = 10.5.sp, fontWeight = FontWeight.ExtraBold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.width(4.dp).height(20.dp).clip(RoundedCornerShape(3.dp)).background(AccentRed))
+                    Spacer(Modifier.width(9.dp))
+                    Text("Account Details", color = White, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+                }
                 Spacer(Modifier.height(8.dp))
                 InfoLine("Full Name", session.fullName.ifBlank { "Not set" })
                 InfoLine("Username", if (session.username.isBlank()) "Not set" else "@${session.username}")
@@ -3177,7 +3091,7 @@ fun ProfileScreen(
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .height(40.dp)
+                    .height(36.dp)
                     .clip(RoundedCornerShape(9.dp))
                     .background(if (loading) Color(0xFF7A1529) else AccentRed)
                     .clickable(enabled = !loading) {
@@ -3193,7 +3107,7 @@ fun ProfileScreen(
                 Text(
                     if (loading) "LOGGING OUT..." else "LOGOUT",
                     color = White,
-                    fontSize = 12.sp,
+                    fontSize = 11.5.sp,
                     fontWeight = FontWeight.ExtraBold
                 )
             }
@@ -3222,168 +3136,85 @@ fun SupportSection() {
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(SurfaceDark)
-            .border(1.dp, Color(0xFF2D2F3E), RoundedCornerShape(16.dp))
-            .padding(horizontal = 14.dp, vertical = 12.dp),
+            .clip(RoundedCornerShape(18.dp))
+            .background(Brush.verticalGradient(listOf(Color(0xFF171A24), Color(0xFF10121A))))
+            .border(1.dp, Color(0xFF292D3A), RoundedCornerShape(18.dp))
+            .padding(horizontal = 16.dp, vertical = 15.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Box(
-                Modifier
-                    .width(3.dp)
-                    .height(14.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(AccentRed)
+                Modifier.width(3.dp).height(19.dp)
+                    .clip(RoundedCornerShape(2.dp)).background(AccentRed)
             )
-            Spacer(Modifier.width(8.dp))
-            Text("SUPPORT", color = White, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.5.sp)
+            Spacer(Modifier.width(9.dp))
+            Column(Modifier.weight(1f)) {
+                Text("SUPPORT", color = White, fontSize = 12.sp,
+                    fontWeight = FontWeight.ExtraBold, letterSpacing = 1.1.sp)
+                Spacer(Modifier.height(2.dp))
+                Text("Get help or connect with us", color = Gray, fontSize = 10.sp)
+            }
+            Box(
+                Modifier.clip(RoundedCornerShape(20.dp))
+                    .background(Color(0xFF28121B))
+                    .padding(horizontal = 9.dp, vertical = 5.dp)
+            ) {
+                Text("WE'RE HERE", color = AccentRed, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+            }
         }
 
-        Spacer(Modifier.height(12.dp))
-
+        Spacer(Modifier.height(15.dp))
         Row(
             Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(22.dp, Alignment.CenterHorizontally),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Instagram
-            SupportTile(
-                background = Brush.linearGradient(
-                    colors = listOf(
-                        Color(0xFFFEDA75), Color(0xFFFA7E1E), Color(0xFFD62976),
-                        Color(0xFF962FBF), Color(0xFF4F5BD5)
-                    ),
-                    start = Offset(0f, Float.POSITIVE_INFINITY),
-                    end = Offset(Float.POSITIVE_INFINITY, 0f)
-                ),
-                onClick = { openUrl(SUPPORT_INSTAGRAM_URL) }
-            ) {
-                Canvas(Modifier.fillMaxSize()) {
-                    val u = size.minDimension / 24f
-                    drawRoundRect(
-                        color = Color.White,
-                        topLeft = Offset(4.5f * u, 4.5f * u),
-                        size = Size(15f * u, 15f * u),
-                        cornerRadius = CornerRadius(4.5f * u, 4.5f * u),
-                        style = Stroke(width = 1.8f * u)
-                    )
-                    drawCircle(
-                        color = Color.White,
-                        radius = 3.6f * u,
-                        center = Offset(12f * u, 12f * u),
-                        style = Stroke(width = 1.8f * u)
-                    )
-                    drawCircle(
-                        color = Color.White,
-                        radius = 1.0f * u,
-                        center = Offset(16.3f * u, 7.7f * u)
-                    )
-                }
+            SupportTile(SolidColor(Color(0xFF20212D)), { openUrl(SUPPORT_INSTAGRAM_URL) }, label = "Instagram") {
+                Text("◎", color = Color(0xFFE66AA7), fontSize = 25.sp, fontWeight = FontWeight.Medium)
             }
-
-            // WhatsApp
-            SupportTile(
-                background = SolidColor(Color(0xFF25D366)),
-                onClick = { openUrl(SUPPORT_WHATSAPP_URL) }
-            ) {
-                Canvas(Modifier.fillMaxSize()) {
-                    val u = size.minDimension / 24f
-                    drawCircle(
-                        color = Color.White,
-                        radius = 7.4f * u,
-                        center = Offset(12f * u, 11.6f * u),
-                        style = Stroke(width = 1.9f * u)
-                    )
-                    val tail = androidx.compose.ui.graphics.Path().apply {
-                        moveTo(4.6f * u, 19.6f * u)
-                        lineTo(5.9f * u, 14.8f * u)
-                        lineTo(9.4f * u, 18.0f * u)
-                        close()
-                    }
-                    drawPath(tail, Color.White)
-                }
-                Icon(
-                    imageVector = Icons.Filled.Call,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(12.dp)
-                )
+            SupportTile(SolidColor(Color(0xFF20212D)), { openUrl(SUPPORT_WHATSAPP_URL) }, label = "WhatsApp") {
+                Text("◉", color = Color(0xFF42D889), fontSize = 23.sp, fontWeight = FontWeight.Bold)
             }
-
-            // Telegram
-            SupportTile(
-                background = SolidColor(Color(0xFF229ED9)),
-                onClick = { openUrl(SUPPORT_TELEGRAM_URL) }
-            ) {
-                Canvas(Modifier.fillMaxSize()) {
-                    val u = size.minDimension / 24f
-                    val plane = androidx.compose.ui.graphics.Path().apply {
-                        moveTo(4.2f * u, 11.6f * u)
-                        lineTo(19.6f * u, 5.4f * u)
-                        lineTo(16.9f * u, 18.6f * u)
-                        lineTo(12.4f * u, 15.2f * u)
-                        lineTo(10.0f * u, 17.6f * u)
-                        lineTo(9.6f * u, 13.4f * u)
-                        close()
-                    }
-                    drawPath(plane, Color.White)
-                    drawLine(
-                        color = Color(0xFF229ED9),
-                        start = Offset(9.8f * u, 13.4f * u),
-                        end = Offset(16.8f * u, 8.4f * u),
-                        strokeWidth = 1.1f * u
-                    )
-                }
+            SupportTile(SolidColor(Color(0xFF20212D)), { openUrl(SUPPORT_TELEGRAM_URL) }, label = "Telegram") {
+                Text("➤", color = Color(0xFF55BDEB), fontSize = 22.sp, fontWeight = FontWeight.Bold)
             }
-
-            // Gmail
-            SupportTile(
-                background = SolidColor(Color.White),
-                onClick = {
-                    openLink(
-                        Intent(
-                            Intent.ACTION_SENDTO,
-                            Uri.parse("mailto:$SUPPORT_EMAIL?subject=" + Uri.encode("AniStream Support"))
-                        )
-                    )
-                }
-            ) {
-                Canvas(Modifier.fillMaxSize()) {
-                    val u = size.minDimension / 24f
-                    val m = androidx.compose.ui.graphics.Path().apply {
-                        moveTo(4.8f * u, 18.2f * u)
-                        lineTo(4.8f * u, 7.2f * u)
-                        lineTo(12f * u, 12.8f * u)
-                        lineTo(19.2f * u, 7.2f * u)
-                        lineTo(19.2f * u, 18.2f * u)
-                    }
-                    drawPath(
-                        path = m,
-                        color = Color(0xFFEA4335),
-                        style = Stroke(width = 2.6f * u, cap = StrokeCap.Round, join = StrokeJoin.Round)
-                    )
-                }
+            SupportTile(SolidColor(Color(0xFF20212D)), {
+                openLink(Intent(
+                    Intent.ACTION_SENDTO,
+                    Uri.parse("mailto:$SUPPORT_EMAIL?subject=" + Uri.encode("AniStream Support"))
+                ))
+            }, label = "Gmail") {
+                Text("✉", color = Color(0xFFFF7777), fontSize = 21.sp, fontWeight = FontWeight.Bold)
             }
         }
     }
 }
 
 @Composable
-private fun SupportTile(
+private fun RowScope.SupportTile(
     background: Brush,
     onClick: () -> Unit,
+    label: String,
     content: @Composable BoxScope.() -> Unit
 ) {
-    Box(
-        Modifier
-            .size(40.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(background)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-        content = content
-    )
+    Column(
+        Modifier.weight(1f),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .clip(RoundedCornerShape(13.dp))
+                .background(background)
+                .border(1.dp, Color(0xFF343847), RoundedCornerShape(13.dp))
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center,
+            content = content
+        )
+        Spacer(Modifier.height(5.dp))
+        Text(label, color = Color(0xFFB9BBC5), fontSize = 9.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+    }
 }
 
 /* ================= COMMUNITY CHAT ================= */
@@ -3726,8 +3557,9 @@ fun SearchScreen(
     }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 6.dp)) {
-        Text("Search Anime", color = White, fontSize = 21.sp, fontWeight = FontWeight.ExtraBold)
-        Spacer(Modifier.height(8.dp))
+        Text("Discover Anime", color = White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+        Text("Find your next favourite series or movie", color = Gray, fontSize = 11.sp)
+        Spacer(Modifier.height(10.dp))
         OutlinedTextField(
             value = searchText,
             onValueChange = onSearchChange,
@@ -3789,7 +3621,8 @@ fun SearchScreen(
                         Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(11.dp))
-                            .background(SurfaceDark)
+                            .background(Brush.horizontalGradient(listOf(Color(0xFF1B1721), SurfaceDark)))
+                            .border(0.7.dp, Color(0xFF3A2431), RoundedCornerShape(11.dp))
                             .clickable { onAnimeClick(anime) }
                             .padding(9.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -4458,16 +4291,8 @@ fun WatchPlayer(
     val context = LocalContext.current
     val activity = context as? Activity
 
-    // Admin may save either the direct embed URL or the full iframe snippet.
-    // WebView must receive the iframe src URL, not the HTML snippet itself.
-    val embedUrl = remember(videoUrl) {
-        val iframeSrc = Regex("""(?i)<iframe[^>]*\bsrc\s*=\s*[\"']([^\"']+)[\"']""")
-            .find(videoUrl)?.groupValues?.getOrNull(1)
-        (iframeSrc ?: videoUrl).trim()
-    }
-
-    val isWebPage = remember(embedUrl) {
-        val lower = embedUrl.lowercase()
+    val isWebPage = remember(videoUrl) {
+        val lower = videoUrl.lowercase()
         !(lower.contains(".mp4") || lower.contains(".m3u8") || lower.contains(".mpd") || lower.contains(".mkv") || lower.contains(".webm"))
     }
 
@@ -4503,20 +4328,6 @@ fun WatchPlayer(
     }
 
     if (isWebPage) {
-        // Embed player (jaise Abyss) ke liye WebView: popup/ads block, fullscreen button kaam kare, band hone par audio ruk jaye
-        val webHolder = remember { arrayOfNulls<WebView>(1) }
-        val pageDone = remember { booleanArrayOf(false) }
-        DisposableEffect(Unit) {
-            onDispose {
-                webHolder[0]?.apply {
-                    webChromeClient?.onHideCustomView()
-                    stopLoading()
-                    loadUrl("about:blank")
-                    destroy()
-                }
-                webHolder[0] = null
-            }
-        }
         Box(
             Modifier
                 .fillMaxWidth()
@@ -4526,82 +4337,17 @@ fun WatchPlayer(
             AndroidView(
                 factory = { ctx ->
                     WebView(ctx).apply {
-                        webHolder[0] = this
-                        tag = embedUrl
-                        pageDone[0] = false
                         layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                         settings.javaScriptEnabled = true
                         settings.domStorageEnabled = true
                         settings.mediaPlaybackRequiresUserGesture = false
                         settings.loadsImagesAutomatically = true
-                        settings.setSupportMultipleWindows(false)
-                        settings.javaScriptCanOpenWindowsAutomatically = false
-                        settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-                        settings.userAgentString = settings.userAgentString.replace("; wv", "")
-                        CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-
-                        var customView: View? = null
-                        var customCallback: WebChromeClient.CustomViewCallback? = null
-                        webChromeClient = object : WebChromeClient() {
-                            // Player ke andar wala fullscreen button
-                            override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
-                                val decor = activity?.window?.decorView as? ViewGroup
-                                if (view == null || decor == null || customView != null) {
-                                    callback?.onCustomViewHidden()
-                                    return
-                                }
-                                customView = view
-                                customCallback = callback
-                                decor.addView(view, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-                                activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-                                activity?.window?.let { w ->
-                                    WindowCompat.setDecorFitsSystemWindows(w, false)
-                                    WindowInsetsControllerCompat(w, w.decorView).hide(WindowInsetsCompat.Type.systemBars())
-                                }
-                            }
-
-                            override fun onHideCustomView() {
-                                val v = customView ?: return
-                                (v.parent as? ViewGroup)?.removeView(v)
-                                customView = null
-                                customCallback?.onCustomViewHidden()
-                                customCallback = null
-                                activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-                                activity?.window?.let { w ->
-                                    WindowCompat.setDecorFitsSystemWindows(w, true)
-                                    WindowInsetsControllerCompat(w, w.decorView).show(WindowInsetsCompat.Type.systemBars())
-                                }
-                            }
-                        }
-
-                        webViewClient = object : WebViewClient() {
-                            override fun onPageFinished(view: WebView?, url: String?) {
-                                pageDone[0] = true
-                            }
-
-                            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                                val u = request?.url ?: return false
-                                val scheme = u.scheme.orEmpty()
-                                // intent:// market:// jaise links block
-                                if (scheme != "http" && scheme != "https") return true
-                                // Pehla page load hone ke baad doosri website par jaane wale (ads/popup) redirects block
-                                val startHost = Uri.parse((view?.tag as? String) ?: embedUrl).host
-                                val allowedPlayerHost = u.host.equals("player.abyssplayer.com", ignoreCase = true)
-                                // Keep top-level navigation on the original embed host; explicitly allow Abyss player host.
-                                if (pageDone[0] && request.isForMainFrame && u.host != startHost && !allowedPlayerHost) return true
-                                return false
-                            }
-                        }
-                        loadUrl(embedUrl)
+                        webChromeClient = WebChromeClient()
+                        webViewClient = WebViewClient()
+                        loadUrl(videoUrl)
                     }
                 },
-                update = {
-                    if (it.tag != embedUrl) {
-                        it.tag = embedUrl
-                        pageDone[0] = false
-                        it.loadUrl(embedUrl)
-                    }
-                },
+                update = { if (it.url != videoUrl) it.loadUrl(videoUrl) },
                 modifier = Modifier.fillMaxSize()
             )
             if (fullscreen) {
@@ -5459,8 +5205,8 @@ fun DownloadsScreen(onPlay: (DownloadInfo) -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("My Downloads", color = White, fontSize = 21.sp, fontWeight = FontWeight.ExtraBold)
-                Text("Saved in Downloads/AniStream • ${downloads.size} items", color = Gray, fontSize = 11.sp)
+                Text("Downloads", color = White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+                Text("Your offline anime library • ${downloads.size} items", color = Gray, fontSize = 11.sp)
             }
             if (failedItems.isNotEmpty()) {
                 SmallOutlineButton(
@@ -5504,7 +5250,8 @@ fun DownloadsScreen(onPlay: (DownloadInfo) -> Unit) {
                     .fillMaxWidth()
                     .padding(bottom = 10.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(SurfaceDark)
+                    .background(Brush.horizontalGradient(listOf(Color(0xFF1B1721), SurfaceDark)))
+                    .border(0.8.dp, Color(0xFF462234), RoundedCornerShape(12.dp))
                     .padding(12.dp)
             ) {
                 Text(item.title, color = White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
@@ -5681,18 +5428,18 @@ fun SmallOutlineButton(
 
     Box(
         modifier = modifier
-            .heightIn(min = 35.dp)
+            .heightIn(min = 33.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(bgColor)
             .border(1.dp, borderColor, RoundedCornerShape(8.dp))
             .clickable(enabled = enabled) { onClick() }
-            .padding(horizontal = 12.dp, vertical = 7.dp),
+            .padding(horizontal = 10.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = text,
             color = txtColor,
-            fontSize = 11.sp,
+            fontSize = 10.5.sp,
             fontWeight = FontWeight.Bold,
             maxLines = 1
         )
