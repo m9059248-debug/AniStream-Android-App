@@ -1333,15 +1333,15 @@ fun AniStreamApp() {
                                 UserAvatarView(
                                     avatarUrl = userSession?.avatarUrl.orEmpty(),
                                     fallbackInitial = badgeLetter,
-                                    size = 22.dp,
-                                    fontSize = 10.sp,
+                                    size = 18.dp,
+                                    fontSize = 9.sp,
                                     modifier = Modifier.clip(CircleShape)
                                 )
                                 Spacer(Modifier.width(6.dp))
                                 Text(
                                     text = displayUserName,
                                     color = White,
-                                    fontSize = 11.sp,
+                                    fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     maxLines = 1
                                 )
@@ -3027,28 +3027,28 @@ fun ProfileScreen(
                 ) {
                     Box(
                         Modifier
-                            .size(62.dp)
+                            .size(50.dp)
                             .clickable { showAvatarDialog = true }
                     ) {
                         UserAvatarView(
                             avatarUrl = session.avatarUrl,
                             fallbackInitial = initial,
-                            size = 58.dp,
-                            fontSize = 22.sp,
+                            size = 46.dp,
+                            fontSize = 18.sp,
                             modifier = Modifier
                                 .clip(CircleShape)
                                 .border(1.5.dp, AccentRed, CircleShape)
                         )
                         Box(
                             Modifier
-                                .size(20.dp)
+                                .size(16.dp)
                                 .align(Alignment.BottomEnd)
                                 .clip(CircleShape)
                                 .background(AccentRed)
                                 .border(1.5.dp, SurfaceDark, CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text("✎", color = White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            Text("✎", color = White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
                         }
                     }
 
@@ -3071,10 +3071,10 @@ fun ProfileScreen(
                         Text(
                             session.fullName.ifBlank { "AniStream User" },
                             color = White,
-                            fontSize = 18.sp,
+                            fontSize = 15.sp,
                             fontWeight = FontWeight.ExtraBold
                         )
-                        Text(session.email, color = Gray, fontSize = 11.5.sp)
+                        Text(session.email, color = Gray, fontSize = 10.5.sp)
                         if (session.username.isNotBlank()) {
                             Text("@${session.username}", color = AccentRed, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                         }
